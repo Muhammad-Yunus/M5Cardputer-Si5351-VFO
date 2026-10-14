@@ -91,13 +91,9 @@ void format_freq(int32_t f, char *buf, size_t n) {
 }
 
 void format_tick(int32_t f, int32_t minor, char *buf, size_t n) {
-  if (minor >= 1000) {
-    snprintf(buf, n, "%d", (int)(f / 1000)); // kHz
-  } else {
-    int dec = (minor >= 100) ? 1 : ((minor >= 10) ? 2 : 3);
-    long div = (dec == 1) ? 100 : ((dec == 2) ? 10 : 1);
-    snprintf(buf, n, "%d.%0*ld", (int)(f / 1000), dec, (long)((f % 1000) / div));
-  }
+  (void)minor;
+  // Dial tick labels are always shown in MHz with one decimal place, e.g. "7.0".
+  snprintf(buf, n, "%d.%d", (int)(f / 1000000), (int)((f % 1000000) / 100000));
 }
 
 void set_freq(int32_t f) {
@@ -115,14 +111,18 @@ void set_freq(int32_t f) {
 
 void update_scale() {
   int32_t minor = STEP_HZ[vfo.step_index];
+  if (minor < 50000) {
+    minor = 50000;  // minimum dial ruler so MHz labels stay on screen at fine steps
+  }
   int32_t base = (vfo.freq / minor) * minor;
+  int32_t major_interval = minor * 2;
   float phase = (float)(vfo.freq % minor) / (float)minor;
   int center = NTICKS / 2;
   for (int i = 0; i < NTICKS; i++) {
     int s = i - center;
     float x = (float)SCALE_CENTER_X + ((float)s - phase) * (float)SCALE_PITCH;
     int32_t tf = base + (int32_t)s * minor;
-    bool major = (((base / minor) + s) % 5) == 0;
+    bool major = (tf >= 0) && ((tf % major_interval) == 0);
     int bottom = major ? TICK_MAJOR_BOTTOM : TICK_MINOR_BOTTOM;
 
     tick_pts[i][0].x = (lv_coord_t)(x + 0.5f);
@@ -135,7 +135,7 @@ void update_scale() {
       char buf[16];
       format_tick(tf, minor, buf, sizeof(buf));
       lv_label_set_text(tick_labels[i], buf);
-      lv_obj_set_pos(tick_labels[i], (lv_coord_t)(x + 0.5f) - 28, TICK_LABEL_Y);
+      lv_obj_set_pos(tick_labels[i], (lv_coord_t)(x + 0.5f) - 22, TICK_LABEL_Y);
       lv_obj_remove_flag(tick_labels[i], LV_OBJ_FLAG_HIDDEN);
     } else {
       lv_obj_add_flag(tick_labels[i], LV_OBJ_FLAG_HIDDEN);
@@ -332,12 +332,12 @@ extern "C" void app_main(void) {
   lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
   lbl_step = lv_label_create(scr);
-  lv_obj_set_style_text_font(lbl_step, &lv_font_unscii_16, 0);
+  lv_obj_set_style_text_font(lbl_step, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(lbl_step, lv_color_hex(COL_STATUS), 0);
   lv_obj_align(lbl_step, LV_ALIGN_TOP_LEFT, 4, 2);
 
   lbl_mem = lv_label_create(scr);
-  lv_obj_set_style_text_font(lbl_mem, &lv_font_unscii_16, 0);
+  lv_obj_set_style_text_font(lbl_mem, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(lbl_mem, lv_color_hex(COL_STATUS), 0);
   lv_obj_align(lbl_mem, LV_ALIGN_TOP_RIGHT, -4, 2);
 
@@ -354,10 +354,11 @@ extern "C" void app_main(void) {
         tick_lines[i], lv_color_hex(((i - NTICKS / 2) % 5 == 0) ? COL_TICK_MAJOR : COL_TICK_MINOR),
         0);
     tick_labels[i] = lv_label_create(scr);
-    lv_obj_set_style_text_font(tick_labels[i], &lv_font_unscii_16, 0);
+    lv_obj_set_style_text_font(tick_labels[i], &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(tick_labels[i], lv_color_hex(COL_TICK_MAJOR), 0);
     lv_obj_set_style_text_align(tick_labels[i], LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_width(tick_labels[i], 56);
+    lv_label_set_long_mode(tick_labels[i], LV_LABEL_LONG_CLIP);
+    lv_obj_set_width(tick_labels[i], 44);
     lv_obj_add_flag(tick_labels[i], LV_OBJ_FLAG_HIDDEN);
   }
 
@@ -369,7 +370,7 @@ extern "C" void app_main(void) {
   lv_line_set_points(pointer_line, pointer_pts, 2);
 
   lbl_hint = lv_label_create(scr);
-  lv_obj_set_style_text_font(lbl_hint, &lv_font_unscii_16, 0);
+  lv_obj_set_style_text_font(lbl_hint, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(lbl_hint, lv_color_hex(COL_TICK_MINOR), 0);
   lv_obj_align(lbl_hint, LV_ALIGN_BOTTOM_MID, 0, -2);
   lv_label_set_text(lbl_hint, ",/ = tune   ;. = step");
