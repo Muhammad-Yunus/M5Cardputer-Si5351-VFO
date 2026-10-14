@@ -1,5 +1,20 @@
 # M5 Cardputer + Si5351 DDS VFO
 
+[![Board](https://img.shields.io/badge/board-M5Stack%20Cardputer%20v1.1-orange)](#kebutuhan-hardware)
+[![SoC](https://img.shields.io/badge/SoC-ESP32--S3-E7352C?logo=espressif&logoColor=white)](https://www.espressif.com/en/products/socs/esp32-s3)
+[![Framework](https://img.shields.io/badge/ESP--IDF-v6.1-E7352C?logo=espressif&logoColor=white)](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/)
+[![Language](https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white)](https://isocpp.org/)
+[![UI](https://img.shields.io/badge/LVGL-v9.6-343434?logo=lvgl&logoColor=white)](https://lvgl.io/)
+[![BSP](https://img.shields.io/badge/BSP-espp%2Fm5stack--cardputer-blueviolet)](https://github.com/esp-cpp/espp)
+[![RF source](https://img.shields.io/badge/RF%20source-Si5351A-008080)](https://www.silabs.com/timing)
+[![Output](https://img.shields.io/badge/output-1%E2%80%93150%20MHz-success)](#spesifikasi-sinyal-output)
+[![License](https://img.shields.io/badge/license-MIT-green)](#lisensi)
+
+[![Last commit](https://img.shields.io/github/last-commit/Muhammad-Yunus/M5Cardputer-Si5351-VFO?logo=github)](https://github.com/Muhammad-Yunus/M5Cardputer-Si5351-VFO/commits/main)
+[![Issues](https://img.shields.io/github/issues/Muhammad-Yunus/M5Cardputer-Si5351-VFO?logo=github)](https://github.com/Muhammad-Yunus/M5Cardputer-Si5351-VFO/issues)
+[![Stars](https://img.shields.io/github/stars/Muhammad-Yunus/M5Cardputer-Si5351-VFO?style=social)](https://github.com/Muhammad-Yunus/M5Cardputer-Si5351-VFO/stargazers)
+[![Forks](https://img.shields.io/github/forks/Muhammad-Yunus/M5Cardputer-Si5351-VFO?style=social)](https://github.com/Muhammad-Yunus/M5Cardputer-Si5351-VFO/network/members)
+
 Firmware **VFO (Variable Frequency Oscillator) berbasis DDS Si5351** untuk
 **M5Stack Cardputer v1.1**, ditulis dengan **ESP-IDF v6.1 (C++)** dan menampilkan
 antarmuka bergaya **dial analog retro** di layar 240×135.
