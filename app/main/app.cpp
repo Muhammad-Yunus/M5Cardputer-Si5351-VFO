@@ -48,13 +48,16 @@ constexpr int32_t CAR_MAX_FREQ = 100000000; // ... upper bound
 constexpr int W = 240;
 constexpr int H = 135;
 constexpr int FOOTER_H = 22; // bottom status bar height
+constexpr int CH_ROW_H = 14; // channel indicator row (CH2 CH1 CH0) at the very top
+constexpr int CH_SEP_Y = 17; // separator line, with margin below the channel row
+constexpr int TOP_SHIFT = 23; // existing UI pushed down by the channel row + margin
 constexpr int SCALE_CENTER_X = 120;
 constexpr int SCALE_PITCH = 20;
 constexpr int NTICKS = 13; // odd -> symmetric around the center index
-constexpr int TICK_TOP = 62;
-constexpr int TICK_MINOR_BOTTOM = 80;
-constexpr int TICK_MAJOR_BOTTOM = 88;
-constexpr int TICK_LABEL_Y = 90;
+constexpr int TICK_TOP = 77; // was 62; grid shortened to make room for CH row
+constexpr int TICK_MINOR_BOTTOM = 84;
+constexpr int TICK_MAJOR_BOTTOM = 90;
+constexpr int TICK_LABEL_Y = 92;
 constexpr int POINTER_W = 22; // red triangle marker, points up
 constexpr int POINTER_H = 16;
 
@@ -113,6 +116,9 @@ lv_obj_t *help_overlay = nullptr;
 bool help_open = false;
 lv_obj_t *lbl_entry = nullptr;
 lv_obj_t *pointer_tri = nullptr;
+lv_obj_t *ch_labels[3] = {}; // CH2 (left), CH1 (mid), CH0 (right)
+lv_obj_t *ch_sep = nullptr;
+lv_point_precise_t ch_sep_pts[2] = {};
 lv_obj_t *tick_lines[NTICKS] = {};
 lv_obj_t *tick_labels[NTICKS] = {};
 lv_point_precise_t tick_pts[NTICKS][2] = {};
@@ -126,8 +132,8 @@ lv_point_precise_t wave_pts[WAVE_N] = {};
 lv_point_precise_t flat_pts[2] = {}; // flatline glyph shown when the carrier is OFF
 
 // Little staircase glyph for the step chip (drawn, not a font symbol).
-constexpr int STEP_W = 20;
-constexpr int STEP_H = 14;
+constexpr int STEP_W = 14;
+constexpr int STEP_H = 10;
 constexpr int STEP_N = 5;
 lv_point_precise_t step_pts[STEP_N] = {};
 
@@ -347,6 +353,17 @@ void update_ui() {
   } else {
     lv_obj_remove_flag(wave_line, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(flat_line, LV_OBJ_FLAG_HIDDEN);
+  }
+  // Channel indicator: CH0 = LO (CLK0), CH1/CH2 = carrier I/Q (CLK1/CLK2).
+  // Bright when the matching Si5351 output is enabled, dim when powered down.
+  {
+    lv_color_t ch_on = lv_color_hex(COL_STATUS);
+    lv_color_t ch_off = lv_color_hex(0x404040);
+    for (int i = 0; i < 3; i++) {
+      uint8_t clk = static_cast<uint8_t>(2 - i); // CH2->CLK2 .. CH0->CLK0
+      bool on = syn != nullptr && syn->clock_enabled(clk);
+      lv_obj_set_style_text_color(ch_labels[i], on ? ch_on : ch_off, 0);
+    }
   }
   update_scale();
 }
@@ -581,6 +598,29 @@ extern "C" void app_main(void) {
   lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
   lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
+  // channel indicator row across the very top: CH2 (left) CH1 (mid) CH0 (right),
+  // followed by a separator line. Bright = output enabled, dim = disabled.
+  {
+    const char *ch_text[3] = {"CH2", "CH1", "CH0"};
+    const lv_align_t ch_align[3] = {LV_ALIGN_TOP_LEFT, LV_ALIGN_TOP_MID,
+                                    LV_ALIGN_TOP_RIGHT};
+    const lv_coord_t ch_dx[3] = {6, 0, -6};
+    for (int i = 0; i < 3; i++) {
+      ch_labels[i] = lv_label_create(scr);
+      lv_obj_set_style_text_font(ch_labels[i], &lv_font_montserrat_14, 0);
+      lv_label_set_text(ch_labels[i], ch_text[i]);
+      lv_obj_align(ch_labels[i], ch_align[i], ch_dx[i], 0);
+    }
+    ch_sep_pts[0] = {0, 0};
+    ch_sep_pts[1] = {W, 0};
+    ch_sep = lv_line_create(scr);
+    lv_obj_set_style_line_width(ch_sep, 1, 0);
+    lv_obj_set_style_line_color(ch_sep, lv_color_hex(COL_STATUS), 0);
+    lv_obj_set_style_line_opa(ch_sep, LV_OPA_40, 0);
+    lv_line_set_points(ch_sep, ch_sep_pts, 2);
+    lv_obj_align(ch_sep, LV_ALIGN_TOP_LEFT, 0, CH_SEP_Y);
+  }
+
   // step-size badge (pill chip): [staircase glyph] 1kHz
   step_chip = lv_obj_create(scr);
   lv_obj_set_size(step_chip, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -595,13 +635,13 @@ extern "C" void app_main(void) {
   lv_obj_set_flex_flow(step_chip, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(step_chip, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
                         LV_FLEX_ALIGN_CENTER);
-  lv_obj_align(step_chip, LV_ALIGN_TOP_LEFT, 4, 2);
+  lv_obj_align(step_chip, LV_ALIGN_TOP_LEFT, 4, 2 + TOP_SHIFT);
 
-  step_pts[0] = {0, 13};
-  step_pts[1] = {0, 7};
-  step_pts[2] = {10, 7};
-  step_pts[3] = {10, 1};
-  step_pts[4] = {20, 1};
+  step_pts[0] = {0, 9};
+  step_pts[1] = {0, 5};
+  step_pts[2] = {7, 5};
+  step_pts[3] = {7, 1};
+  step_pts[4] = {14, 1};
   step_line = lv_line_create(step_chip);
   lv_obj_set_size(step_line, STEP_W, STEP_H);
   lv_line_set_points(step_line, step_pts, STEP_N);
@@ -626,7 +666,7 @@ extern "C" void app_main(void) {
   lv_obj_set_flex_flow(mem_chip, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(mem_chip, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
                         LV_FLEX_ALIGN_CENTER);
-  lv_obj_align(mem_chip, LV_ALIGN_TOP_RIGHT, -4, 2);
+  lv_obj_align(mem_chip, LV_ALIGN_TOP_RIGHT, -4, 2 + TOP_SHIFT);
 
   lbl_mem_icon = lv_label_create(mem_chip);
   lv_obj_set_style_text_font(lbl_mem_icon, &lv_font_montserrat_14, 0);
@@ -649,7 +689,7 @@ extern "C" void app_main(void) {
   lv_obj_set_flex_flow(car_chip, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(car_chip, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
                         LV_FLEX_ALIGN_CENTER);
-  lv_obj_align(car_chip, LV_ALIGN_TOP_MID, 0, 2);
+  lv_obj_align(car_chip, LV_ALIGN_TOP_MID, 0, 2 + TOP_SHIFT);
 
   for (int i = 0; i < WAVE_N; i++) {
     float t = (float)i / (float)(WAVE_N - 1);
@@ -685,7 +725,7 @@ extern "C" void app_main(void) {
   lv_obj_clear_flag(freq_row, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_flex_flow(freq_row, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(freq_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
-  lv_obj_align(freq_row, LV_ALIGN_TOP_MID, 0, 24);
+  lv_obj_align(freq_row, LV_ALIGN_TOP_MID, 0, 24 + TOP_SHIFT);
 
   lbl_prefix = lv_label_create(freq_row);
   lv_obj_set_style_text_font(lbl_prefix, &lv_font_montserrat_14, 0);

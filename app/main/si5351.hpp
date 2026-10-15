@@ -137,6 +137,11 @@ public:
 
     uint32_t frequency() const { return freq_hz_; }
 
+    // True when the given output (CLK0..CLK2) is enabled in the OEB shadow.
+    bool clock_enabled(uint8_t clk) const {
+        return clk < 8 && !(oeb_ & (1u << clk));
+    }
+
 private:
     bool write_reg(uint8_t reg, uint8_t value) {
         uint8_t data[2] = {reg, value};

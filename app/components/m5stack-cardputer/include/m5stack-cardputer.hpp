@@ -684,7 +684,8 @@ protected:
 
   // LCD (1.14" 240x135 IPS, ST7789V2). The panel is a 240x135 window into the
   // controller's 320x240 (landscape) RAM, centered: x offset (320-240)/2=40,
-  // y offset (240-135)/2=52.
+  // y offset (240-135)/2=52.5 -> 53 (52 leaves a 1px unwritten line at the
+  // bottom of this panel).
   static constexpr size_t lcd_width_ = 240;
   static constexpr size_t lcd_height_ = 135;
   static constexpr size_t lcd_bytes_per_pixel = 2;
@@ -698,7 +699,7 @@ protected:
   static constexpr gpio_num_t lcd_reset_io = GPIO_NUM_33;
   static constexpr gpio_num_t backlight_io = GPIO_NUM_38;
   static constexpr int lcd_offset_x = 40;
-  static constexpr int lcd_offset_y = 52;
+  static constexpr int lcd_offset_y = 53;
   static constexpr bool backlight_value = true;
   static constexpr bool reset_value = false;
   static constexpr bool invert_colors = false;
