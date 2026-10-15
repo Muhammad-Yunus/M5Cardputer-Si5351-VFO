@@ -646,7 +646,7 @@ extern "C" void app_main(void) {
   // each preceded by a travelling sine glyph, followed by a separator line.
   // Bright + moving = output enabled, dim + flat = disabled.
   {
-    const char *ch_text[3] = {"CH2", "CH1", "CH0"};
+    const char *ch_text[3] = {"CH2 (Q)", "CH1 (I)", "CH0"};
     const lv_align_t ch_align[3] = {LV_ALIGN_TOP_LEFT, LV_ALIGN_TOP_MID,
                                     LV_ALIGN_TOP_RIGHT};
     const lv_coord_t ch_dx[3] = {6, 0, -6};
