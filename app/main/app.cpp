@@ -7,6 +7,9 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 
+#include "driver/gpio.h"
+#include "esp_rom_sys.h"
+
 #include "i2c.hpp"
 #include "lvgl.h"
 #include "m5stack-cardputer.hpp"
@@ -70,6 +73,8 @@ QueueHandle_t key_queue = nullptr;
 Si5351 *syn = nullptr;
 
 lv_obj_t *lbl_freq = nullptr;
+lv_obj_t *freq_row = nullptr;
+lv_obj_t *lbl_unit = nullptr;
 lv_obj_t *lbl_step = nullptr;
 lv_obj_t *lbl_mem = nullptr;
 lv_obj_t *lbl_hint = nullptr;
@@ -90,10 +95,51 @@ void format_freq(int32_t f, char *buf, size_t n) {
            (int)(f % 1000));
 }
 
+// Group a string of digits with '.' every 3 digits from the right, e.g.
+// "11000" -> "11.000" and "1100000" -> "1.100.000".
+std::string group_digits(const std::string &digits) {
+  std::string out;
+  int n = (int)digits.size();
+  for (int i = 0; i < n; i++) {
+    if (i > 0 && ((n - i) % 3) == 0) {
+      out.push_back('.');
+    }
+    out.push_back(digits[i]);
+  }
+  return out;
+}
+
+// Recover a bus that a slave may be holding low (e.g. after a warm reset in the
+// middle of a transaction): clock SCL up to 9 times, then issue a STOP.
+void i2c_bus_recover(int sda, int scl) {
+  gpio_config_t io = {};
+  io.pin_bit_mask = (1ULL << sda) | (1ULL << scl);
+  io.mode = GPIO_MODE_INPUT_OUTPUT_OD;
+  io.pull_up_en = GPIO_PULLUP_ENABLE;
+  gpio_config(&io);
+  gpio_set_level((gpio_num_t)scl, 1);
+  gpio_set_level((gpio_num_t)sda, 1);
+  esp_rom_delay_us(10);
+  if (gpio_get_level((gpio_num_t)sda) == 0) {
+    for (int i = 0; i < 9 && gpio_get_level((gpio_num_t)sda) == 0; i++) {
+      gpio_set_level((gpio_num_t)scl, 0);
+      esp_rom_delay_us(10);
+      gpio_set_level((gpio_num_t)scl, 1);
+      esp_rom_delay_us(10);
+    }
+    gpio_set_level((gpio_num_t)sda, 0);
+    esp_rom_delay_us(10);
+    gpio_set_level((gpio_num_t)scl, 1);
+    esp_rom_delay_us(10);
+    gpio_set_level((gpio_num_t)sda, 1);
+    esp_rom_delay_us(10);
+  }
+}
+
 void format_tick(int32_t f, int32_t minor, char *buf, size_t n) {
   (void)minor;
-  // Dial tick labels are always shown in MHz with one decimal place, e.g. "7.0".
-  snprintf(buf, n, "%d.%d", (int)(f / 1000000), (int)((f % 1000000) / 100000));
+  // Dial tick labels are always shown in MHz with one decimal place, e.g. "7.0M".
+  snprintf(buf, n, "%d.%dM", (int)(f / 1000000), (int)((f % 1000000) / 100000));
 }
 
 void set_freq(int32_t f) {
@@ -135,7 +181,7 @@ void update_scale() {
       char buf[16];
       format_tick(tf, minor, buf, sizeof(buf));
       lv_label_set_text(tick_labels[i], buf);
-      lv_obj_set_pos(tick_labels[i], (lv_coord_t)(x + 0.5f) - 22, TICK_LABEL_Y);
+      lv_obj_set_pos(tick_labels[i], (lv_coord_t)(x + 0.5f) - 26, TICK_LABEL_Y);
       lv_obj_remove_flag(tick_labels[i], LV_OBJ_FLAG_HIDDEN);
     } else {
       lv_obj_add_flag(tick_labels[i], LV_OBJ_FLAG_HIDDEN);
@@ -146,7 +192,8 @@ void update_scale() {
 void update_ui() {
   char buf[24];
   if (vfo.entering) {
-    snprintf(buf, sizeof(buf), "%s_", vfo.entry.c_str());
+    std::string grouped = group_digits(vfo.entry);
+    snprintf(buf, sizeof(buf), "%s_", grouped.c_str());
     lv_label_set_text(lbl_freq, buf);
   } else {
     format_freq(vfo.freq, buf, sizeof(buf));
@@ -301,6 +348,11 @@ extern "C" void app_main(void) {
   // we claim I2C port 0 for the Grove connector avoids a bus-acquire conflict.
   cardputer.variant();
 
+  // Free the Grove bus in case a previous run/reset left the Si5351 holding SDA
+  // low (which would NACK every transaction until a full power cycle).
+  i2c_bus_recover(espp::M5StackCardputer::grove_sda_gpio(),
+                  espp::M5StackCardputer::grove_scl_gpio());
+
   // --- software key queue (callback -> main loop hand-off) ---
   key_queue = xQueueCreate(16, sizeof(KeyMsg));
 
@@ -341,10 +393,26 @@ extern "C" void app_main(void) {
   lv_obj_set_style_text_color(lbl_mem, lv_color_hex(COL_STATUS), 0);
   lv_obj_align(lbl_mem, LV_ALIGN_TOP_RIGHT, -4, 2);
 
-  lbl_freq = lv_label_create(scr);
+  // frequency readout: big digits + a half-size "Hz" unit sat on the baseline
+  freq_row = lv_obj_create(scr);
+  lv_obj_set_size(freq_row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_set_style_bg_opa(freq_row, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(freq_row, 0, 0);
+  lv_obj_set_style_pad_all(freq_row, 0, 0);
+  lv_obj_set_style_pad_column(freq_row, 4, 0);
+  lv_obj_clear_flag(freq_row, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_flex_flow(freq_row, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(freq_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
+  lv_obj_align(freq_row, LV_ALIGN_TOP_MID, 0, 20);
+
+  lbl_freq = lv_label_create(freq_row);
   lv_obj_set_style_text_font(lbl_freq, &lv_font_montserrat_28, 0);
   lv_obj_set_style_text_color(lbl_freq, lv_color_hex(COL_READOUT), 0);
-  lv_obj_align(lbl_freq, LV_ALIGN_TOP_MID, 0, 20);
+
+  lbl_unit = lv_label_create(freq_row);
+  lv_obj_set_style_text_font(lbl_unit, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(lbl_unit, lv_color_hex(COL_READOUT), 0);
+  lv_label_set_text(lbl_unit, "Hz");
 
   // sliding analog scale
   for (int i = 0; i < NTICKS; i++) {
@@ -358,7 +426,7 @@ extern "C" void app_main(void) {
     lv_obj_set_style_text_color(tick_labels[i], lv_color_hex(COL_TICK_MAJOR), 0);
     lv_obj_set_style_text_align(tick_labels[i], LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(tick_labels[i], LV_LABEL_LONG_CLIP);
-    lv_obj_set_width(tick_labels[i], 44);
+    lv_obj_set_width(tick_labels[i], 52);
     lv_obj_add_flag(tick_labels[i], LV_OBJ_FLAG_HIDDEN);
   }
 
