@@ -74,7 +74,7 @@ public:
             msc = 1;
         }
         uint32_t pa = 0, pb = 0, pc = 0;
-        divider(DEFAULT_XTAL_HZ, vco_hz, pa, pb, pc);  // PLLA feedback
+        divider(vco_hz, DEFAULT_XTAL_HZ, pa, pb, pc);  // PLLA feedback = VCO/xtal
         if (!write_pll(26, pa, pb, pc)) {              // PLLA regs 26..33
             return false;
         }
@@ -120,7 +120,7 @@ public:
         }
         const uint32_t vco_hz = n * freq_hz;
         uint32_t a = 0, b = 0, c = 0;
-        divider(DEFAULT_XTAL_HZ, vco_hz, a, b, c);     // PLLB feedback
+        divider(vco_hz, DEFAULT_XTAL_HZ, a, b, c);     // PLLB feedback = VCO/xtal
         if (!write_pll(34, a, b, c)) {                 // PLLB regs 34..41
             return false;
         }
