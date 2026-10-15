@@ -47,6 +47,7 @@ constexpr int32_t CAR_MAX_FREQ = 100000000; // ... upper bound
 // Layout (240 x 135)
 constexpr int W = 240;
 constexpr int H = 135;
+constexpr int FOOTER_H = 22; // bottom status bar height
 constexpr int SCALE_CENTER_X = 120;
 constexpr int SCALE_PITCH = 20;
 constexpr int NTICKS = 13; // odd -> symmetric around the center index
@@ -61,6 +62,7 @@ constexpr uint32_t COL_TICK_MINOR = 0x8A6A2A;
 constexpr uint32_t COL_TICK_MAJOR = 0xFFCC66;
 constexpr uint32_t COL_POINTER = 0xFF3B1E;
 constexpr uint32_t COL_STATUS = 0x66CCAA;
+constexpr uint32_t COL_FOOTER_BG = 0x101A19; // dark teal footer bar
 
 struct KeyMsg {
   char value;
@@ -93,10 +95,14 @@ lv_obj_t *lbl_unit = nullptr;
 lv_obj_t *step_chip = nullptr;
 lv_obj_t *step_line = nullptr;
 lv_obj_t *lbl_step = nullptr;
+lv_obj_t *mem_chip = nullptr;
+lv_obj_t *lbl_mem_icon = nullptr;
 lv_obj_t *lbl_mem = nullptr;
+lv_obj_t *status_bar = nullptr;
 lv_obj_t *lbl_aux = nullptr;
 lv_obj_t *car_chip = nullptr;
 lv_obj_t *wave_line = nullptr;
+lv_obj_t *flat_line = nullptr;
 lv_obj_t *lbl_car = nullptr;
 lv_obj_t *lbl_hint = nullptr;
 lv_obj_t *lbl_entry = nullptr;
@@ -112,6 +118,7 @@ constexpr int WAVE_H = 14;
 constexpr int WAVE_N = 13;
 constexpr float WAVE_PI = 3.14159265f;
 lv_point_precise_t wave_pts[WAVE_N] = {};
+lv_point_precise_t flat_pts[2] = {}; // flatline glyph shown when the carrier is OFF
 
 // Little staircase glyph for the step chip (drawn, not a font symbol).
 constexpr int STEP_W = 20;
@@ -174,6 +181,19 @@ void format_tick(int32_t f, int32_t minor, char *buf, size_t n) {
   (void)minor;
   // Dial tick labels are always shown in MHz with one decimal place, e.g. "7.0M".
   snprintf(buf, n, "%d.%dM", (int)(f / 1000000), (int)((f % 1000000) / 100000));
+}
+
+// Signed IF offset in MHz: '.' thousands grouping, ',' decimal (4 places), e.g.
+// -455000 -> "-0,4550 MHz" and 45000000 -> "+45,0000 MHz".
+void format_mhz_offset(int32_t hz, char *buf, size_t n) {
+  char sign = (hz < 0) ? '-' : '+';
+  uint32_t a = (uint32_t)(hz < 0 ? -(int64_t)hz : (int64_t)hz);
+  uint32_t whole = a / 1000000u;
+  uint32_t frac = (a / 100u) % 10000u; // 4 decimals -> 100 Hz resolution
+  char grp[16];
+  snprintf(grp, sizeof(grp), "%u", (unsigned)whole);
+  snprintf(buf, n, "%c%s,%04u MHz", sign, group_digits(std::string(grp)).c_str(),
+           (unsigned)frac);
 }
 
 // The LO actually runs at (display frequency + IF offset); the display never
@@ -295,21 +315,26 @@ void update_ui() {
     lv_label_set_text(lbl_freq, buf);
   }
   lv_label_set_text(lbl_step, STEP_NAME[vfo.step_index]);
-  lv_label_set_text_fmt(lbl_mem, "MEM %02d%s", vfo.mem_index + 1,
+  lv_label_set_text_fmt(lbl_mem, "%02d%s", vfo.mem_index + 1,
                         vfo.memories[vfo.mem_index] ? "*" : " ");
-  lv_label_set_text_fmt(lbl_aux, "IF%+ld", (long)vfo.if_offset);
+  char off[32];
+  format_mhz_offset(vfo.if_offset, off, sizeof(off));
+  lv_label_set_text_fmt(lbl_aux, "IF %s", off);
   lv_label_set_text(lbl_car, car_mode_name());
   lv_color_t car_col = lv_color_hex(car_mode_color());
   lv_obj_set_style_line_color(wave_line, car_col, 0);
+  lv_obj_set_style_line_color(flat_line, car_col, 0);
   lv_obj_set_style_text_color(lbl_car, car_col, 0);
   lv_obj_set_style_border_color(car_chip, car_col, 0);
   lv_obj_set_style_bg_color(car_chip, car_col, 0);
   lv_obj_set_style_bg_opa(car_chip, vfo.car_mode ? LV_OPA_20 : LV_OPA_TRANSP, 0);
-  // OFF really means no carrier, so don't draw any waveform for it.
+  // OFF means no carrier, so show a flatline (dead signal) instead of a wave.
   if (vfo.car_mode == 0) {
     lv_obj_add_flag(wave_line, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(flat_line, LV_OBJ_FLAG_HIDDEN);
   } else {
     lv_obj_remove_flag(wave_line, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(flat_line, LV_OBJ_FLAG_HIDDEN);
   }
   update_scale();
 }
@@ -570,10 +595,30 @@ extern "C" void app_main(void) {
   lv_obj_set_style_text_font(lbl_step, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(lbl_step, lv_color_hex(COL_STATUS), 0);
 
-  lbl_mem = lv_label_create(scr);
+  // memory-slot badge (pill chip): [floppy] 01*
+  mem_chip = lv_obj_create(scr);
+  lv_obj_set_size(mem_chip, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_clear_flag(mem_chip, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_radius(mem_chip, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_border_width(mem_chip, 1, 0);
+  lv_obj_set_style_border_color(mem_chip, lv_color_hex(COL_STATUS), 0);
+  lv_obj_set_style_bg_opa(mem_chip, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_pad_hor(mem_chip, 6, 0);
+  lv_obj_set_style_pad_ver(mem_chip, 0, 0);
+  lv_obj_set_style_pad_column(mem_chip, 3, 0);
+  lv_obj_set_flex_flow(mem_chip, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(mem_chip, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_align(mem_chip, LV_ALIGN_TOP_RIGHT, -4, 2);
+
+  lbl_mem_icon = lv_label_create(mem_chip);
+  lv_obj_set_style_text_font(lbl_mem_icon, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(lbl_mem_icon, lv_color_hex(COL_STATUS), 0);
+  lv_label_set_text(lbl_mem_icon, LV_SYMBOL_SAVE);
+
+  lbl_mem = lv_label_create(mem_chip);
   lv_obj_set_style_text_font(lbl_mem, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(lbl_mem, lv_color_hex(COL_STATUS), 0);
-  lv_obj_align(lbl_mem, LV_ALIGN_TOP_RIGHT, -4, 2);
 
   // carrier / BFO badge (pill chip): [icon] USB|LSB|OFF, colour-coded
   car_chip = lv_obj_create(scr);
@@ -599,6 +644,15 @@ extern "C" void app_main(void) {
   lv_obj_set_size(wave_line, WAVE_W, WAVE_H);
   lv_line_set_points(wave_line, wave_pts, WAVE_N);
   lv_obj_set_style_line_width(wave_line, 2, 0);
+
+  // flatline glyph: a dead/empty signal, shown when the carrier is OFF
+  flat_pts[0] = {6, WAVE_H / 2};
+  flat_pts[1] = {16, WAVE_H / 2};
+  flat_line = lv_line_create(car_chip);
+  lv_obj_set_size(flat_line, WAVE_W, WAVE_H);
+  lv_line_set_points(flat_line, flat_pts, 2);
+  lv_obj_set_style_line_width(flat_line, 2, 0);
+  lv_obj_add_flag(flat_line, LV_OBJ_FLAG_HIDDEN);
 
   lbl_car = lv_label_create(car_chip);
   lv_obj_set_style_text_font(lbl_car, &lv_font_montserrat_14, 0);
@@ -648,16 +702,30 @@ extern "C" void app_main(void) {
   pointer_pts[1] = {(lv_coord_t)SCALE_CENTER_X, TICK_MAJOR_BOTTOM + 2};
   lv_line_set_points(pointer_line, pointer_pts, 2);
 
-  // bottom row: IF/carrier status on the left, key hint on the right
-  lbl_aux = lv_label_create(scr);
+  // bottom status bar: full-width footer with IF offset (left) and key hint (right)
+  status_bar = lv_obj_create(scr);
+  lv_obj_set_size(status_bar, W, FOOTER_H);
+  lv_obj_clear_flag(status_bar, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_radius(status_bar, 0, 0);
+  lv_obj_set_style_bg_color(status_bar, lv_color_hex(COL_FOOTER_BG), 0);
+  lv_obj_set_style_bg_opa(status_bar, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(status_bar, 1, 0);
+  lv_obj_set_style_border_side(status_bar, LV_BORDER_SIDE_TOP, 0);
+  lv_obj_set_style_border_color(status_bar, lv_color_hex(COL_STATUS), 0);
+  lv_obj_set_style_border_opa(status_bar, LV_OPA_30, 0);
+  lv_obj_set_style_pad_hor(status_bar, 5, 0);
+  lv_obj_set_style_pad_ver(status_bar, 0, 0);
+  lv_obj_align(status_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+
+  lbl_aux = lv_label_create(status_bar);
   lv_obj_set_style_text_font(lbl_aux, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(lbl_aux, lv_color_hex(COL_STATUS), 0);
-  lv_obj_align(lbl_aux, LV_ALIGN_BOTTOM_LEFT, 4, -2);
+  lv_obj_align(lbl_aux, LV_ALIGN_LEFT_MID, 0, 0);
 
-  lbl_hint = lv_label_create(scr);
+  lbl_hint = lv_label_create(status_bar);
   lv_obj_set_style_text_font(lbl_hint, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(lbl_hint, lv_color_hex(COL_TICK_MINOR), 0);
-  lv_obj_align(lbl_hint, LV_ALIGN_BOTTOM_RIGHT, -4, -2);
+  lv_obj_align(lbl_hint, LV_ALIGN_RIGHT_MID, 0, 0);
   lv_label_set_text(lbl_hint, ",/ tune  ;. step  c car");
 
   // --- keyboard ---
