@@ -14,4 +14,8 @@ dependencies:
   #   # `public` flag doesn't have an effect dependencies of the `main` component.
   #   # All dependencies of `main` are public by default.
   #   public: true
-  espp/m5stack-cardputer: =*
+  # Local vendored copy (app/components/m5stack-cardputer) with
+  # invert_colors=false to correct the panel color inversion on this unit.
+  espp/m5stack-cardputer:
+    version: "*"
+    override_path: "../components/m5stack-cardputer"

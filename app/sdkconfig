@@ -3791,24 +3791,6 @@ CONFIG_WL_SECTOR_SIZE=4096
 # end of Wear Levelling
 
 #
-# ESPP I2C Component Configuration
-#
-# default:
-# CONFIG_ESPP_I2C_USE_LEGACY_API is not set
-# default:
-CONFIG_ESPP_I2C_USE_NEW_API=y
-# end of ESPP I2C Component Configuration
-
-#
-# ESPP Logger
-#
-# default:
-CONFIG_ESPP_LOGGER_LOG_LEVEL=4
-# default:
-CONFIG_ESPP_LOGGER_ENABLE_CURSOR_COMMANDS=y
-# end of ESPP Logger
-
-#
 # M5Stack Cardputer Configuration
 #
 # default:
@@ -3836,6 +3818,24 @@ CONFIG_M5STACK_CARDPUTER_MICROPHONE_TASK_PRIORITY=19
 # default:
 CONFIG_M5STACK_CARDPUTER_MICROPHONE_TASK_CORE_ID=1
 # end of M5Stack Cardputer Configuration
+
+#
+# ESPP I2C Component Configuration
+#
+# default:
+# CONFIG_ESPP_I2C_USE_LEGACY_API is not set
+# default:
+CONFIG_ESPP_I2C_USE_NEW_API=y
+# end of ESPP I2C Component Configuration
+
+#
+# ESPP Logger
+#
+# default:
+CONFIG_ESPP_LOGGER_LOG_LEVEL=4
+# default:
+CONFIG_ESPP_LOGGER_ENABLE_CURSOR_COMMANDS=y
+# end of ESPP Logger
 
 #
 # LVGL

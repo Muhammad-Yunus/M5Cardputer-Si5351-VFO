@@ -55,6 +55,8 @@ constexpr int TICK_TOP = 62;
 constexpr int TICK_MINOR_BOTTOM = 80;
 constexpr int TICK_MAJOR_BOTTOM = 88;
 constexpr int TICK_LABEL_Y = 90;
+constexpr int POINTER_W = 22; // red triangle marker, points up
+constexpr int POINTER_H = 16;
 
 // Retro amber-on-black palette
 constexpr uint32_t COL_READOUT = 0xFFCC66;
@@ -75,7 +77,7 @@ enum EntryTarget { ENTRY_NONE, ENTRY_FREQ, ENTRY_IF, ENTRY_CAR };
 
 struct VfoState {
   int32_t freq = 7074000; // start at 7.074 MHz
-  int step_index = 2;     // 1 kHz
+  int step_index = 3;     // 10 kHz
   int mem_index = 0;
   int32_t memories[NUM_MEM] = {};
   EntryTarget entry_target = ENTRY_NONE;
@@ -110,11 +112,10 @@ lv_obj_t *lbl_help = nullptr;
 lv_obj_t *help_overlay = nullptr;
 bool help_open = false;
 lv_obj_t *lbl_entry = nullptr;
-lv_obj_t *pointer_line = nullptr;
+lv_obj_t *pointer_tri = nullptr;
 lv_obj_t *tick_lines[NTICKS] = {};
 lv_obj_t *tick_labels[NTICKS] = {};
 lv_point_precise_t tick_pts[NTICKS][2] = {};
-lv_point_precise_t pointer_pts[2] = {};
 
 // Little sine-wave glyph for the carrier chip (drawn, not a font symbol).
 constexpr int WAVE_W = 22;
@@ -716,12 +717,26 @@ extern "C" void app_main(void) {
     lv_obj_add_flag(tick_labels[i], LV_OBJ_FLAG_HIDDEN);
   }
 
-  pointer_line = lv_line_create(scr);
-  lv_obj_set_style_line_width(pointer_line, 3, 0);
-  lv_obj_set_style_line_color(pointer_line, lv_color_hex(COL_POINTER), 0);
-  pointer_pts[0] = {(lv_coord_t)SCALE_CENTER_X, TICK_TOP - 4};
-  pointer_pts[1] = {(lv_coord_t)SCALE_CENTER_X, TICK_MAJOR_BOTTOM + 2};
-  lv_line_set_points(pointer_line, pointer_pts, 2);
+  // red triangle marker (points up) at the current-frequency position,
+  // like a speedometer needle; drawn into a canvas so the color is exact
+  static lv_draw_buf_t *pointer_buf =
+      lv_draw_buf_create(POINTER_W, POINTER_H, LV_COLOR_FORMAT_ARGB8888, 0);
+  pointer_tri = lv_canvas_create(scr);
+  lv_canvas_set_draw_buf(pointer_tri, pointer_buf);
+  lv_obj_clear_flag(pointer_tri, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(pointer_tri, LV_OBJ_FLAG_IGNORE_LAYOUT);
+  lv_obj_align(pointer_tri, LV_ALIGN_TOP_LEFT, SCALE_CENTER_X - POINTER_W / 2,
+               TICK_MAJOR_BOTTOM + 1 - POINTER_H);
+  lv_canvas_fill_bg(pointer_tri, lv_color_black(), LV_OPA_TRANSP);
+  lv_color_t tri_red = lv_color_hex(0xFF0000);
+  for (int y = 0; y < POINTER_H; y++) {
+    int half = (POINTER_W / 2) * y / (POINTER_H - 1);
+    for (int x = POINTER_W / 2 - half; x <= POINTER_W / 2 + half; x++) {
+      if (x >= 0 && x < POINTER_W) {
+        lv_canvas_set_px(pointer_tri, x, y, tri_red, LV_OPA_COVER);
+      }
+    }
+  }
 
   // bottom status bar: full-width footer with IF offset (left) and key hint (right)
   status_bar = lv_obj_create(scr);

@@ -1,0 +1,37 @@
+dependencies:
+  espp/adc: '>=1.0'
+  espp/base_component: '>=1.0'
+  espp/bmi270: '>=1.0'
+  espp/display: '>=1.0'
+  espp/display_drivers: '>=1.0'
+  espp/gps: '>=1.0'
+  espp/i2c: '>=1.0'
+  espp/interrupt: '>=1.0'
+  espp/led: '>=1.0'
+  espp/math: '>=1.0'
+  espp/neopixel: '>=1.0'
+  espp/sdcard: '>=1.0'
+  espp/spi: '>=1.0'
+  espp/sx126x: '>=1.0'
+  espp/task: '>=1.0'
+  idf:
+    version: '>=5.0'
+description: M5Stack Cardputer Board Support Package (BSP) component in C++ for ESP32-S3
+documentation: https://esp-cpp.github.io/espp/dev_boards/m5stack/m5stack_cardputer.html
+license: MIT
+maintainers:
+- William Emfinger <waemfinger@gmail.com>
+repository: git://github.com/esp-cpp/espp.git
+repository_info:
+  commit_sha: 01aaa9703e2e32bc707c494fd6371d7af769ce13
+  path: components/m5stack-cardputer
+tags:
+- cpp
+- Component
+- M5Stack
+- Cardputer
+- BSP
+targets:
+- esp32s3
+url: https://github.com/esp-cpp/espp/tree/main/components/m5stack-cardputer
+version: 1.3.8
