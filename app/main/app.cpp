@@ -120,6 +120,18 @@ lv_obj_t *ch_labels[3] = {}; // CH2 (left), CH1 (mid), CH0 (right)
 lv_obj_t *ch_sep = nullptr;
 lv_point_precise_t ch_sep_pts[2] = {};
 lv_obj_t *tick_lines[NTICKS] = {};
+
+// Little travelling sine glyph shown left of each CHx label. The icon spans
+// exactly one wavelength, so advancing the phase makes the wave travel while
+// its shape and width stay constant. Off channels show a flat line instead.
+constexpr int CHW_W = 14;
+constexpr int CHW_H = 10;
+constexpr int CHW_N = 11;
+constexpr float CHW_AMP = 3.0f;
+lv_obj_t *ch_wave[3] = {};
+lv_point_precise_t ch_wave_pts[3][CHW_N] = {};
+bool ch_wave_active[3] = {};
+float ch_wave_phase[3] = {};
 lv_obj_t *tick_labels[NTICKS] = {};
 lv_point_precise_t tick_pts[NTICKS][2] = {};
 
@@ -138,6 +150,35 @@ constexpr int STEP_N = 5;
 lv_point_precise_t step_pts[STEP_N] = {};
 
 // ---- helpers --------------------------------------------------------------
+
+// Draw the per-channel icon: one wavelength of sine at the current phase, or a
+// flat line while the channel is disabled.
+void ch_wave_render(int i) {
+  for (int j = 0; j < CHW_N; j++) {
+    float u = (float)j / (float)(CHW_N - 1);
+    float y = (float)CHW_H / 2.0f;
+    if (ch_wave_active[i]) {
+      y -= CHW_AMP * sinf(2.0f * WAVE_PI * u - ch_wave_phase[i]);
+    }
+    ch_wave_pts[i][j].x = (lv_coord_t)(u * (float)CHW_W + 0.5f);
+    ch_wave_pts[i][j].y = (lv_coord_t)(y + 0.5f);
+  }
+  lv_line_set_points(ch_wave[i], ch_wave_pts[i], CHW_N);
+}
+
+// Advance only the enabled channels so the active sines keep travelling.
+void ch_wave_tick(lv_timer_t *) {
+  for (int i = 0; i < 3; i++) {
+    if (!ch_wave_active[i]) {
+      continue;
+    }
+    ch_wave_phase[i] += 0.5f;
+    if (ch_wave_phase[i] >= 2.0f * WAVE_PI) {
+      ch_wave_phase[i] -= 2.0f * WAVE_PI;
+    }
+    ch_wave_render(i);
+  }
+}
 
 void format_freq(int32_t f, char *buf, size_t n) {
   if (f < 0) {
@@ -363,6 +404,9 @@ void update_ui() {
       uint8_t clk = static_cast<uint8_t>(2 - i); // CH2->CLK2 .. CH0->CLK0
       bool on = syn != nullptr && syn->clock_enabled(clk);
       lv_obj_set_style_text_color(ch_labels[i], on ? ch_on : ch_off, 0);
+      lv_obj_set_style_line_color(ch_wave[i], on ? ch_on : ch_off, 0);
+      ch_wave_active[i] = on;
+      ch_wave_render(i); // switch sine <-> flatline immediately
     }
   }
   update_scale();
@@ -599,17 +643,35 @@ extern "C" void app_main(void) {
   lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
   // channel indicator row across the very top: CH2 (left) CH1 (mid) CH0 (right),
-  // followed by a separator line. Bright = output enabled, dim = disabled.
+  // each preceded by a travelling sine glyph, followed by a separator line.
+  // Bright + moving = output enabled, dim + flat = disabled.
   {
     const char *ch_text[3] = {"CH2", "CH1", "CH0"};
     const lv_align_t ch_align[3] = {LV_ALIGN_TOP_LEFT, LV_ALIGN_TOP_MID,
                                     LV_ALIGN_TOP_RIGHT};
     const lv_coord_t ch_dx[3] = {6, 0, -6};
     for (int i = 0; i < 3; i++) {
-      ch_labels[i] = lv_label_create(scr);
+      lv_obj_t *box = lv_obj_create(scr);
+      lv_obj_set_size(box, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+      lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+      lv_obj_set_style_bg_opa(box, LV_OPA_TRANSP, 0);
+      lv_obj_set_style_border_width(box, 0, 0);
+      lv_obj_set_style_pad_all(box, 0, 0);
+      lv_obj_set_style_pad_column(box, 3, 0);
+      lv_obj_set_flex_flow(box, LV_FLEX_FLOW_ROW);
+      lv_obj_set_flex_align(box, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                            LV_FLEX_ALIGN_CENTER);
+      lv_obj_align(box, ch_align[i], ch_dx[i], 0);
+
+      ch_wave[i] = lv_line_create(box);
+      lv_obj_set_size(ch_wave[i], CHW_W, CHW_H);
+      lv_obj_set_style_line_width(ch_wave[i], 1, 0);
+      lv_obj_set_style_line_color(ch_wave[i], lv_color_hex(0x404040), 0);
+      ch_wave_render(i);
+
+      ch_labels[i] = lv_label_create(box);
       lv_obj_set_style_text_font(ch_labels[i], &lv_font_montserrat_14, 0);
       lv_label_set_text(ch_labels[i], ch_text[i]);
-      lv_obj_align(ch_labels[i], ch_align[i], ch_dx[i], 0);
     }
     ch_sep_pts[0] = {0, 0};
     ch_sep_pts[1] = {W, 0};
@@ -619,6 +681,8 @@ extern "C" void app_main(void) {
     lv_obj_set_style_line_opa(ch_sep, LV_OPA_40, 0);
     lv_line_set_points(ch_sep, ch_sep_pts, 2);
     lv_obj_align(ch_sep, LV_ALIGN_TOP_LEFT, 0, CH_SEP_Y);
+
+    lv_timer_create(ch_wave_tick, 60, nullptr);
   }
 
   // step-size badge (pill chip): [staircase glyph] 1kHz
@@ -892,6 +956,7 @@ extern "C" void app_main(void) {
 
   // --- main loop: service LVGL and process key events ---
   uint32_t last_log = 0;
+  uint32_t last_si_retry = 0;
   while (true) {
     lv_timer_handler();
     KeyMsg msg;
@@ -899,6 +964,18 @@ extern "C" void app_main(void) {
       handle_key(msg);
     }
     uint32_t now = xTaskGetTickCount();
+    // The first I2C transaction after boot can time out before the Si5351 bus
+    // settles; keep re-initialising until it answers, then push the initial LO
+    // and carrier so the CH0 indicator comes up on its own.
+    if (!si_ok && (now - last_si_retry) > pdMS_TO_TICKS(500)) {
+      last_si_retry = now;
+      if (synth.init()) {
+        si_ok = true;
+        apply_lo();
+        apply_carrier();
+        update_ui();
+      }
+    }
     if (now - last_log > pdMS_TO_TICKS(3000)) {
       last_log = now;
       printf("VFO %ld Hz  step=%s  mem=%02d  IF%+ld  car=%s@%ld  si5351=%s\n",
