@@ -90,6 +90,8 @@ Si5351 *syn = nullptr;
 lv_obj_t *lbl_freq = nullptr;
 lv_obj_t *freq_row = nullptr;
 lv_obj_t *lbl_unit = nullptr;
+lv_obj_t *step_chip = nullptr;
+lv_obj_t *step_line = nullptr;
 lv_obj_t *lbl_step = nullptr;
 lv_obj_t *lbl_mem = nullptr;
 lv_obj_t *lbl_aux = nullptr;
@@ -110,6 +112,12 @@ constexpr int WAVE_H = 14;
 constexpr int WAVE_N = 13;
 constexpr float WAVE_PI = 3.14159265f;
 lv_point_precise_t wave_pts[WAVE_N] = {};
+
+// Little staircase glyph for the step chip (drawn, not a font symbol).
+constexpr int STEP_W = 20;
+constexpr int STEP_H = 14;
+constexpr int STEP_N = 5;
+lv_point_precise_t step_pts[STEP_N] = {};
 
 // ---- helpers --------------------------------------------------------------
 
@@ -286,7 +294,7 @@ void update_ui() {
     format_freq(vfo.freq, buf, sizeof(buf));
     lv_label_set_text(lbl_freq, buf);
   }
-  lv_label_set_text_fmt(lbl_step, "STEP %s", STEP_NAME[vfo.step_index]);
+  lv_label_set_text(lbl_step, STEP_NAME[vfo.step_index]);
   lv_label_set_text_fmt(lbl_mem, "MEM %02d%s", vfo.mem_index + 1,
                         vfo.memories[vfo.mem_index] ? "*" : " ");
   lv_label_set_text_fmt(lbl_aux, "IF%+ld", (long)vfo.if_offset);
@@ -531,10 +539,36 @@ extern "C" void app_main(void) {
   lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
   lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
-  lbl_step = lv_label_create(scr);
+  // step-size badge (pill chip): [staircase glyph] 1kHz
+  step_chip = lv_obj_create(scr);
+  lv_obj_set_size(step_chip, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_clear_flag(step_chip, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_radius(step_chip, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_border_width(step_chip, 1, 0);
+  lv_obj_set_style_border_color(step_chip, lv_color_hex(COL_STATUS), 0);
+  lv_obj_set_style_bg_opa(step_chip, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_pad_hor(step_chip, 6, 0);
+  lv_obj_set_style_pad_ver(step_chip, 0, 0);
+  lv_obj_set_style_pad_column(step_chip, 3, 0);
+  lv_obj_set_flex_flow(step_chip, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(step_chip, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_align(step_chip, LV_ALIGN_TOP_LEFT, 4, 2);
+
+  step_pts[0] = {0, 13};
+  step_pts[1] = {0, 7};
+  step_pts[2] = {10, 7};
+  step_pts[3] = {10, 1};
+  step_pts[4] = {20, 1};
+  step_line = lv_line_create(step_chip);
+  lv_obj_set_size(step_line, STEP_W, STEP_H);
+  lv_line_set_points(step_line, step_pts, STEP_N);
+  lv_obj_set_style_line_width(step_line, 2, 0);
+  lv_obj_set_style_line_color(step_line, lv_color_hex(COL_STATUS), 0);
+
+  lbl_step = lv_label_create(step_chip);
   lv_obj_set_style_text_font(lbl_step, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(lbl_step, lv_color_hex(COL_STATUS), 0);
-  lv_obj_align(lbl_step, LV_ALIGN_TOP_LEFT, 4, 2);
 
   lbl_mem = lv_label_create(scr);
   lv_obj_set_style_text_font(lbl_mem, &lv_font_montserrat_14, 0);
