@@ -123,6 +123,12 @@ lv_obj_t *flat_line = nullptr;
 lv_obj_t *lbl_car = nullptr;
 lv_obj_t *help_chip = nullptr;
 lv_obj_t *lbl_help = nullptr;
+lv_obj_t *batt_box = nullptr;
+lv_obj_t *lbl_batt = nullptr;  // "NN%" text, sits left of the icon
+lv_obj_t *batt_body = nullptr; // battery outline
+lv_obj_t *batt_fill = nullptr; // proportional fill inside the outline
+lv_obj_t *batt_tip = nullptr;  // little terminal nub
+int batt_pct_last = -1;
 lv_obj_t *help_overlay = nullptr;
 bool help_open = false;
 lv_obj_t *lbl_entry = nullptr;
@@ -159,6 +165,11 @@ constexpr int STEP_W = 14;
 constexpr int STEP_H = 10;
 constexpr int STEP_N = 5;
 lv_point_precise_t step_pts[STEP_N] = {};
+
+// Battery icon geometry (fill spans BATT_FILL_MAX pixels at 100%).
+constexpr int BATT_W = 20;
+constexpr int BATT_H = 11;
+constexpr int BATT_FILL_MAX = 15;
 
 // ---- helpers --------------------------------------------------------------
 
@@ -430,6 +441,33 @@ void update_ui() {
     }
   }
   update_scale();
+}
+
+// Battery indicator: read the pack voltage (GPIO 10 through the BSP's 2:1
+// divider) and refresh the percent label and the fill of the battery icon.
+// Called only occasionally since the state of charge changes slowly; hides the
+// widget if the ADC is unreadable (e.g. no pack attached).
+void update_battery() {
+  auto &cp = espp::M5StackCardputer::get();
+  float v = cp.battery_voltage();
+  if (v < 0.5f) {
+    lv_obj_add_flag(batt_box, LV_OBJ_FLAG_HIDDEN);
+    batt_pct_last = -1;
+    return;
+  }
+  lv_obj_remove_flag(batt_box, LV_OBJ_FLAG_HIDDEN);
+  int pct = (int)(cp.battery_soc() + 0.5f);
+  pct = pct < 0 ? 0 : (pct > 100 ? 100 : pct);
+  if (pct == batt_pct_last) {
+    return;
+  }
+  batt_pct_last = pct;
+  lv_label_set_text_fmt(lbl_batt, "%d%%", pct);
+  lv_obj_set_width(batt_fill, (lv_coord_t)(BATT_FILL_MAX * pct / 100));
+  lv_color_t col = pct <= 15   ? lv_color_hex(0xFF3B1E)
+                   : pct <= 40 ? lv_color_hex(0xFFCC66)
+                               : lv_color_hex(0x5CD65C);
+  lv_obj_set_style_bg_color(batt_fill, col, 0);
 }
 
 void memorize() {
@@ -896,6 +934,55 @@ extern "C" void app_main(void) {
   lv_label_set_text(lbl_help, "?");
   lv_obj_center(lbl_help);
 
+  // battery indicator: percent text left of a battery icon whose fill tracks
+  // the state of charge, placed just left of the help chip
+  batt_box = lv_obj_create(status_bar);
+  lv_obj_set_size(batt_box, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_clear_flag(batt_box, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_radius(batt_box, 0, 0);
+  lv_obj_set_style_border_width(batt_box, 0, 0);
+  lv_obj_set_style_bg_opa(batt_box, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_pad_all(batt_box, 0, 0);
+  lv_obj_set_style_pad_column(batt_box, 3, 0);
+  lv_obj_set_flex_flow(batt_box, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(batt_box, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  // Right-align at a fixed offset that leaves room for the help chip (18px +
+  // 5px bar pad) and the icon's terminal nub, so the label grows leftwards.
+  lv_obj_align(batt_box, LV_ALIGN_RIGHT_MID, -26, 0);
+
+  lbl_batt = lv_label_create(batt_box);
+  lv_obj_set_style_text_font(lbl_batt, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(lbl_batt, lv_color_hex(COL_STATUS), 0);
+  lv_label_set_text(lbl_batt, "100%");
+
+  batt_body = lv_obj_create(batt_box);
+  lv_obj_set_size(batt_body, BATT_W, BATT_H);
+  lv_obj_clear_flag(batt_body, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(batt_body, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+  lv_obj_set_style_radius(batt_body, 2, 0);
+  lv_obj_set_style_border_width(batt_body, 1, 0);
+  lv_obj_set_style_border_color(batt_body, lv_color_hex(COL_STATUS), 0);
+  lv_obj_set_style_bg_opa(batt_body, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_pad_all(batt_body, 0, 0);
+
+  batt_tip = lv_obj_create(batt_body);
+  lv_obj_set_size(batt_tip, 2, 5);
+  lv_obj_clear_flag(batt_tip, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_radius(batt_tip, 0, 0);
+  lv_obj_set_style_border_width(batt_tip, 0, 0);
+  lv_obj_set_style_bg_color(batt_tip, lv_color_hex(COL_STATUS), 0);
+  lv_obj_set_style_bg_opa(batt_tip, LV_OPA_COVER, 0);
+  lv_obj_align(batt_tip, LV_ALIGN_RIGHT_MID, 3, 0);
+
+  batt_fill = lv_obj_create(batt_body);
+  lv_obj_set_size(batt_fill, 0, 7);
+  lv_obj_clear_flag(batt_fill, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_radius(batt_fill, 1, 0);
+  lv_obj_set_style_border_width(batt_fill, 0, 0);
+  lv_obj_set_style_bg_opa(batt_fill, LV_OPA_COVER, 0);
+  lv_obj_align(batt_fill, LV_ALIGN_LEFT_MID, 1, 0);
+
   // help popup: dim the screen and show a panel of shortcuts ('h' to toggle,
   // Esc to close). Created hidden and raised to the foreground when opened.
   help_overlay = lv_obj_create(scr);
@@ -971,11 +1058,13 @@ extern "C" void app_main(void) {
     apply_lo();
     apply_carrier();
   }
+  update_battery();
   update_ui();
 
   // --- main loop: service LVGL and process key events ---
   uint32_t last_log = 0;
   uint32_t last_si_retry = 0;
+  uint32_t last_batt = 0;
   while (true) {
     lv_timer_handler();
     KeyMsg msg;
@@ -995,12 +1084,17 @@ extern "C" void app_main(void) {
         update_ui();
       }
     }
+    if (now - last_batt > pdMS_TO_TICKS(2000)) {
+      last_batt = now;
+      update_battery();
+    }
     if (now - last_log > pdMS_TO_TICKS(3000)) {
       last_log = now;
-      printf("VFO %ld Hz  step=%s  mem=%02d  IF%+ld  car=%s@%ld  si5351=%s\n",
+      printf("VFO %ld Hz  step=%s  mem=%02d  IF%+ld  car=%s@%ld  si5351=%s  "
+             "batt=%.2fV\n",
              (long)vfo.freq, STEP_NAME[vfo.step_index], vfo.mem_index + 1,
              (long)vfo.if_offset, car_mode_name(), (long)vfo.car_freq,
-             si_ok ? "OK" : "FAIL");
+             si_ok ? "OK" : "FAIL", cardputer.battery_voltage());
     }
     vTaskDelay(pdMS_TO_TICKS(20));
   }

@@ -22,6 +22,8 @@ antarmuka bergaya **dial analog retro** di layar 240×135.
 Cardputer berperan sebagai *controller* + *display* + *keypad*, sedangkan modul
 **Si5351A** (lewat konektor Grove) menghasilkan sinyal clock/RF presisi.
 
+<p align="center"><img src="docs/banner.jpg" alt="banner" style="max-width:60%"></p>
+
 ---
 
 ## Fitur
@@ -71,6 +73,12 @@ Alamat I2C Si5351: **0x60**.
 > mendeteksi varian board (`cardputer.variant()`) agar bus internal ADV di
 > GPIO 8/9 selesai dan port 0 dilepas sebelum diklaim untuk Si5351.
 
+### 3D Print spacer
+<img src="docs/cardputer-3d-spacer.png" alt="hardware setup" style="max-width:40%"><br>
+- Download STL file : [💾 Download](docs/cardputer-3d-spacer.stl)
+
+### Hardware Setup
+<img src="docs/hardware-setup.jpeg" alt="hardware setup" style="max-width:60%">
 ---
 
 ## Arsitektur Perangkat Lunak
