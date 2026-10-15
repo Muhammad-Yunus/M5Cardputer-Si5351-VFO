@@ -91,6 +91,7 @@ Si5351 *syn = nullptr;
 
 lv_obj_t *lbl_freq = nullptr;
 lv_obj_t *freq_row = nullptr;
+lv_obj_t *lbl_prefix = nullptr;
 lv_obj_t *lbl_unit = nullptr;
 lv_obj_t *step_chip = nullptr;
 lv_obj_t *step_line = nullptr;
@@ -104,7 +105,6 @@ lv_obj_t *car_chip = nullptr;
 lv_obj_t *wave_line = nullptr;
 lv_obj_t *flat_line = nullptr;
 lv_obj_t *lbl_car = nullptr;
-lv_obj_t *lbl_hint = nullptr;
 lv_obj_t *help_chip = nullptr;
 lv_obj_t *lbl_help = nullptr;
 lv_obj_t *help_overlay = nullptr;
@@ -310,6 +310,13 @@ uint32_t car_mode_color() {
 
 void update_ui() {
   char buf[24];
+  const char *prefix = "";
+  if (vfo.entry_target == ENTRY_IF) {
+    prefix = "IF";
+  } else if (vfo.entry_target == ENTRY_CAR) {
+    prefix = "CAR";
+  }
+  lv_label_set_text(lbl_prefix, prefix);
   if (vfo.entry_target != ENTRY_NONE) {
     std::string shown = entry_text();
     snprintf(buf, sizeof(buf), "%s_", shown.c_str());
@@ -339,12 +346,6 @@ void update_ui() {
   } else {
     lv_obj_remove_flag(wave_line, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(flat_line, LV_OBJ_FLAG_HIDDEN);
-  }
-  // hide the help badge while a numeric entry is active (the hint takes over)
-  if (vfo.entry_target != ENTRY_NONE) {
-    lv_obj_add_flag(help_chip, LV_OBJ_FLAG_HIDDEN);
-  } else {
-    lv_obj_remove_flag(help_chip, LV_OBJ_FLAG_HIDDEN);
   }
   update_scale();
 }
@@ -451,15 +452,6 @@ void handle_key(const KeyMsg &msg) {
       vfo.entry_target = ENTRY_NONE;
     }
     update_ui();
-    if (vfo.entry_target == ENTRY_FREQ) {
-      lv_label_set_text(lbl_hint, "Hz, Enter=OK, Esc=batal");
-    } else if (vfo.entry_target == ENTRY_IF) {
-      lv_label_set_text(lbl_hint, "IF Hz, Enter=OK, Esc=batal");
-    } else if (vfo.entry_target == ENTRY_CAR) {
-      lv_label_set_text(lbl_hint, "CAR Hz, Enter=OK, Esc=batal");
-    } else {
-      lv_label_set_text(lbl_hint, "");
-    }
     return;
   }
 
@@ -513,7 +505,6 @@ void handle_key(const KeyMsg &msg) {
     }
     break;
   }
-  lv_label_set_text(lbl_hint, "");
   update_ui();
 }
 
@@ -695,6 +686,11 @@ extern "C" void app_main(void) {
   lv_obj_set_flex_align(freq_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
   lv_obj_align(freq_row, LV_ALIGN_TOP_MID, 0, 24);
 
+  lbl_prefix = lv_label_create(freq_row);
+  lv_obj_set_style_text_font(lbl_prefix, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(lbl_prefix, lv_color_hex(COL_STATUS), 0);
+  lv_label_set_text(lbl_prefix, "");
+
   lbl_freq = lv_label_create(freq_row);
   lv_obj_set_style_text_font(lbl_freq, &lv_font_montserrat_28, 0);
   lv_obj_set_style_text_color(lbl_freq, lv_color_hex(COL_READOUT), 0);
@@ -747,13 +743,6 @@ extern "C" void app_main(void) {
   lv_obj_set_style_text_color(lbl_aux, lv_color_hex(COL_STATUS), 0);
   lv_obj_align(lbl_aux, LV_ALIGN_LEFT_MID, 0, 0);
 
-  lbl_hint = lv_label_create(status_bar);
-  lv_obj_set_style_text_font(lbl_hint, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(lbl_hint, lv_color_hex(COL_TICK_MINOR), 0);
-  lv_obj_align(lbl_hint, LV_ALIGN_RIGHT_MID, 0, 0);
-  lv_label_set_text(lbl_hint, "");
-
-  // help badge (bottom-right): press 'h' to toggle the shortcuts popup
   help_chip = lv_obj_create(status_bar);
   lv_obj_set_size(help_chip, 18, 18);
   lv_obj_clear_flag(help_chip, LV_OBJ_FLAG_SCROLLABLE);
