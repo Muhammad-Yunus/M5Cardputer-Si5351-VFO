@@ -39,6 +39,17 @@ constexpr const char *STEP_NAME[NUM_STEPS] = {"10Hz", "100Hz", "1kHz", "10kHz",
                                               "100kHz", "1MHz", "10MHz"};
 constexpr int NUM_MEM = 20;
 
+// Preset band centre frequencies (slots 0..NUM_PRESETS-1). The memory chip
+// shows MEM_ALIAS; the remaining slots stay free for user memories.
+constexpr int NUM_PRESETS = 15;
+constexpr int32_t MEM_PRESET_HZ[NUM_PRESETS] = {
+    1900000,   3700000,   7050000,   10125000, 14175000, 18110000, 21225000,
+    24940000,  28850000,  52000000,  98000000, 122500000, 146000000,
+    159000000, 165000000};
+constexpr const char *MEM_ALIAS[NUM_PRESETS] = {
+    "160M", "80M", "40M", "30M", "20M", "17M", "15M", "12M",
+    "10M",  "6M",  "AIRM", "ATC", "2M", "MAR", "LMR"};
+
 // Carrier / BFO (CLK1 = I, CLK2 = Q). USB/LSB shift the BFO off the carrier.
 constexpr int32_t SB_OFFSET_HZ = 1500;
 constexpr int32_t CAR_MIN_FREQ = 4800000;   // quadrature phase trick lower bound
@@ -374,8 +385,17 @@ void update_ui() {
     lv_label_set_text(lbl_freq, buf);
   }
   lv_label_set_text(lbl_step, STEP_NAME[vfo.step_index]);
-  lv_label_set_text_fmt(lbl_mem, "%02d%s", vfo.mem_index + 1,
-                        vfo.memories[vfo.mem_index] ? "*" : " ");
+  // Memory chip: preset slots show the band alias, the rest the slot number.
+  // A trailing '*' marks a populated slot the dial has moved away from.
+  bool mem_dirty = vfo.memories[vfo.mem_index] != 0 &&
+                   vfo.memories[vfo.mem_index] != vfo.freq;
+  if (vfo.mem_index < NUM_PRESETS) {
+    lv_label_set_text_fmt(lbl_mem, "%s%s", MEM_ALIAS[vfo.mem_index],
+                          mem_dirty ? "*" : " ");
+  } else {
+    lv_label_set_text_fmt(lbl_mem, "%02d%s", vfo.mem_index + 1,
+                          mem_dirty ? "*" : " ");
+  }
   char off[32];
   format_mhz_offset(vfo.if_offset, off, sizeof(off));
   lv_label_set_text_fmt(lbl_aux, "IF %s", off);
@@ -629,13 +649,12 @@ extern "C" void app_main(void) {
   syn = &synth;
   bool si_ok = i2c.initialized() && i2c.probe_device(0x60) && synth.init();
 
-  // preset memories (common HF/VHF frequencies)
-  const int32_t presets[10] = {3573000, 5357000, 7074000, 10100000, 14074000,
-                               18100000, 21074000, 24890000, 28400000, 50100000};
-  for (int i = 0; i < 10; i++) {
-    vfo.memories[i] = presets[i];
+  // preset memories: band centre frequencies, shown by alias
+  for (int i = 0; i < NUM_PRESETS; i++) {
+    vfo.memories[i] = MEM_PRESET_HZ[i];
   }
-  vfo.freq = 7074000;
+  vfo.mem_index = 2;                 // 40 m
+  vfo.freq = MEM_PRESET_HZ[2];
 
   // --- build UI ---
   lv_obj_t *scr = lv_screen_active();

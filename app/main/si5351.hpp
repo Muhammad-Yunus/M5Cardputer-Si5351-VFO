@@ -50,25 +50,40 @@ public:
         return true;
     }
 
-    // Local oscillator (Hz) on the given clock (0..2, default CLK0): fixed
-    // 900 MHz PLLA VCO + a fractional MultiSynth divider.
+    // Local oscillator (Hz) on the given clock (0..2, default CLK0). The VCO is
+    // kept in 600..900 MHz: outputs up to ~112.5 MHz use a 900 MHz VCO with a
+    // fractional MultiSynth divider, higher outputs an integer divider
+    // (VCO = N * Fout), which is required once the fractional divider would
+    // fall below its minimum of 8 (and lets us reach the VHF band centres).
     bool set_frequency(uint32_t freq_hz, uint8_t clk = 0) {
-        if (freq_hz < 1000000UL || freq_hz > 150000000UL || clk > 2) {
+        if (freq_hz < 1000000UL || freq_hz > 200000000UL || clk > 2) {
             return false;
         }
-        const uint32_t vco_hz = 900000000UL;
-        uint32_t a = 0, b = 0, c = 0;
-        divider(DEFAULT_XTAL_HZ, vco_hz, a, b, c);     // PLLA feedback = 36
-        if (!write_pll(26, a, b, c)) {                 // PLLA regs 26..33
+        uint32_t vco_hz = 900000000UL;
+        uint32_t msa = 0, msb = 0, msc = 0;
+        if (vco_hz / freq_hz >= 8) {
+            divider(vco_hz, freq_hz, msa, msb, msc);   // fractional MultiSynth
+        } else {
+            uint32_t n = vco_hz / freq_hz;             // integer MultiSynth
+            if (n < 4) {
+                n = 4;
+            }
+            vco_hz = n * freq_hz;
+            msa = n;
+            msb = 0;
+            msc = 1;
+        }
+        uint32_t pa = 0, pb = 0, pc = 0;
+        divider(DEFAULT_XTAL_HZ, vco_hz, pa, pb, pc);  // PLLA feedback
+        if (!write_pll(26, pa, pb, pc)) {              // PLLA regs 26..33
             return false;
         }
-        divider(vco_hz, freq_hz, a, b, c);             // MultiSynth = VCO / Fout
         const uint8_t ms_base = static_cast<uint8_t>(42 + clk * 8);
-        if (!write_ms(ms_base, a, b, c)) {
+        if (!write_ms(ms_base, msa, msb, msc)) {
             return false;
         }
         // CLKx control: source = MSx from PLLA, 2 mA drive; integer mode if b == 0.
-        uint8_t ctrl = 0x0C | ((b == 0) ? 0x40 : 0x00);
+        uint8_t ctrl = 0x0C | ((msb == 0) ? 0x40 : 0x00);
         if (!write_reg(static_cast<uint8_t>(16 + clk), ctrl)) {
             return false;
         }
