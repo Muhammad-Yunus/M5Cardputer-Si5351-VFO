@@ -105,6 +105,10 @@ lv_obj_t *wave_line = nullptr;
 lv_obj_t *flat_line = nullptr;
 lv_obj_t *lbl_car = nullptr;
 lv_obj_t *lbl_hint = nullptr;
+lv_obj_t *help_chip = nullptr;
+lv_obj_t *lbl_help = nullptr;
+lv_obj_t *help_overlay = nullptr;
+bool help_open = false;
 lv_obj_t *lbl_entry = nullptr;
 lv_obj_t *pointer_line = nullptr;
 lv_obj_t *tick_lines[NTICKS] = {};
@@ -336,6 +340,12 @@ void update_ui() {
     lv_obj_remove_flag(wave_line, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(flat_line, LV_OBJ_FLAG_HIDDEN);
   }
+  // hide the help badge while a numeric entry is active (the hint takes over)
+  if (vfo.entry_target != ENTRY_NONE) {
+    lv_obj_add_flag(help_chip, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_remove_flag(help_chip, LV_OBJ_FLAG_HIDDEN);
+  }
   update_scale();
 }
 
@@ -386,6 +396,21 @@ void handle_key(const KeyMsg &msg) {
   char c = msg.value;
   auto special = static_cast<espp::M5StackCardputer::SpecialKey>(msg.special);
   using SK = espp::M5StackCardputer::SpecialKey;
+
+  // Help popup: 'h' toggles it, Esc closes it. While open, swallow other keys.
+  if (help_open) {
+    if (special == SK::ESC || c == '`' || c == 'h') {
+      help_open = false;
+      lv_obj_add_flag(help_overlay, LV_OBJ_FLAG_HIDDEN);
+    }
+    return;
+  }
+  if (c == 'h') {
+    help_open = true;
+    lv_obj_remove_flag(help_overlay, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(help_overlay);
+    return;
+  }
 
   // Fn + arrows report value 0 with a special key; map them onto the same
   // characters as the (unshifted) , . ; / keys so both paths tune/step.
@@ -726,7 +751,90 @@ extern "C" void app_main(void) {
   lv_obj_set_style_text_font(lbl_hint, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(lbl_hint, lv_color_hex(COL_TICK_MINOR), 0);
   lv_obj_align(lbl_hint, LV_ALIGN_RIGHT_MID, 0, 0);
-  lv_label_set_text(lbl_hint, ",/ tune  ;. step  c car");
+  lv_label_set_text(lbl_hint, "");
+
+  // help badge (bottom-right): press 'h' to toggle the shortcuts popup
+  help_chip = lv_obj_create(status_bar);
+  lv_obj_set_size(help_chip, 18, 18);
+  lv_obj_clear_flag(help_chip, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_radius(help_chip, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_border_width(help_chip, 1, 0);
+  lv_obj_set_style_border_color(help_chip, lv_color_hex(COL_STATUS), 0);
+  lv_obj_set_style_bg_opa(help_chip, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_pad_all(help_chip, 0, 0);
+  lv_obj_align(help_chip, LV_ALIGN_RIGHT_MID, 0, 0);
+  lbl_help = lv_label_create(help_chip);
+  lv_obj_set_style_text_font(lbl_help, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(lbl_help, lv_color_hex(COL_STATUS), 0);
+  lv_label_set_text(lbl_help, "?");
+  lv_obj_center(lbl_help);
+
+  // help popup: dim the screen and show a panel of shortcuts ('h' to toggle,
+  // Esc to close). Created hidden and raised to the foreground when opened.
+  help_overlay = lv_obj_create(scr);
+  lv_obj_set_size(help_overlay, W, H);
+  lv_obj_clear_flag(help_overlay, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_radius(help_overlay, 0, 0);
+  lv_obj_set_style_border_width(help_overlay, 0, 0);
+  lv_obj_set_style_bg_color(help_overlay, lv_color_black(), 0);
+  lv_obj_set_style_bg_opa(help_overlay, LV_OPA_70, 0);
+  lv_obj_set_style_pad_all(help_overlay, 0, 0);
+  lv_obj_set_flex_flow(help_overlay, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(help_overlay, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_align(help_overlay, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_add_flag(help_overlay, LV_OBJ_FLAG_HIDDEN);
+
+  lv_obj_t *help_panel = lv_obj_create(help_overlay);
+  lv_obj_set_width(help_panel, LV_PCT(96));
+  lv_obj_set_height(help_panel, LV_SIZE_CONTENT);
+  lv_obj_clear_flag(help_panel, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_radius(help_panel, 6, 0);
+  lv_obj_set_style_border_width(help_panel, 1, 0);
+  lv_obj_set_style_border_color(help_panel, lv_color_hex(COL_STATUS), 0);
+  lv_obj_set_style_bg_color(help_panel, lv_color_hex(COL_FOOTER_BG), 0);
+  lv_obj_set_style_bg_opa(help_panel, LV_OPA_COVER, 0);
+  lv_obj_set_style_pad_all(help_panel, 6, 0);
+
+  // lay it out as a grid: 4 columns (15% / 35% / 15% / 35%); the first two
+  // rows only use the first key column and let the value span the rest.
+  lv_obj_set_layout(help_panel, LV_LAYOUT_GRID);
+  static lv_coord_t help_cols[] = {LV_GRID_FR(3), LV_GRID_FR(7), LV_GRID_FR(3),
+                                   LV_GRID_FR(7), LV_GRID_TEMPLATE_LAST};
+  static lv_coord_t help_rows[] = {
+      LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_CONTENT,
+      LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST};
+  lv_obj_set_grid_dsc_array(help_panel, help_cols, help_rows);
+  lv_obj_set_style_pad_row(help_panel, 1, 0);
+  lv_obj_set_style_pad_column(help_panel, 4, 0);
+
+  auto help_cell = [&](const char *txt, int col, int span, int row) {
+    lv_obj_t *l = lv_label_create(help_panel);
+    lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(l, lv_color_hex(COL_STATUS), 0);
+    lv_label_set_text(l, txt);
+    lv_obj_set_grid_cell(l, LV_GRID_ALIGN_STRETCH, col, span, LV_GRID_ALIGN_CENTER, row, 1);
+  };
+  help_cell("0-9", 0, 1, 0);
+  help_cell("input freq", 1, 3, 0);
+  help_cell("c", 0, 1, 1);
+  help_cell("carrier OFF/CW/USB/LSB", 1, 3, 1);
+  help_cell(", /", 0, 1, 2);
+  help_cell("tune -/+", 1, 1, 2);
+  help_cell("; .", 2, 1, 2);
+  help_cell("step +/-", 3, 1, 2);
+  help_cell("m n", 0, 1, 3);
+  help_cell("mem -/+", 1, 1, 3);
+  help_cell("s", 2, 1, 3);
+  help_cell("save", 3, 1, 3);
+  help_cell("o", 0, 1, 4);
+  help_cell("IF offset", 1, 1, 4);
+  help_cell("i", 2, 1, 4);
+  help_cell("car freq", 3, 1, 4);
+  help_cell("h", 0, 1, 5);
+  help_cell("help", 1, 1, 5);
+  help_cell("Esc", 2, 1, 5);
+  help_cell("close", 3, 1, 5);
 
   // --- keyboard ---
   cardputer.initialize_keyboard(on_key);
