@@ -26,11 +26,15 @@ Cardputer berperan sebagai *controller* + *display* + *keypad*, sedangkan modul
 
 ## Fitur
 
-- **Rentang output 1 MHz – 150 MHz** pada `CLK0` Si5351.
+- **Rentang output 1 MHz – 150 MHz** pada `CLK0` Si5351 (LO).
 - **Tuning bertahap (step):** 10 Hz, 100 Hz, 1 kHz, 10 kHz, 100 kHz, 1 MHz, 10 MHz.
 - **20 memori** frekuensi (next/prev + simpan). 10 slot pertama sudah diisi
   preset band HF/VHF umum.
 - **Entry frekuensi langsung** (ketik dalam Hz lalu Enter).
+- **IF offset** yang bisa diatur: LO = frekuensi tampil + offset, sedangkan
+  display tetap menunjukkan frekuensi sinyal (untuk receiver superheterodyne).
+- **Carrier / BFO I/Q** pada `CLK1` (I) dan `CLK2` (Q), 90° terpisah, dengan
+  mode **USB / LSB** (±1500 Hz) dan on/off.
 - **Tampilan retro:** angka frekuensi besar + **skala dial bergerak** dengan
   pointer tetap di tengah + tick minor/major + label amber.
 - **Status bar:** step aktif (kiri) dan nomor memori (kanan).
@@ -58,7 +62,8 @@ Cardputer berperan sebagai *controller* + *display* + *keypad*, sedangkan modul
 | SDA    | GPIO 2         | Data I2C              |
 | 3V3    | 3V3            | Catu daya modul       |
 | GND    | GND            | Ground                |
-| OUT    | —              | `CLK0` = output VFO   |
+| OUT    | —              | `CLK0` = LO (VFO)     |
+| AUX    | —              | `CLK1` = carrier I, `CLK2` = carrier Q (BFO) |
 
 Alamat I2C Si5351: **0x60**.
 
@@ -78,11 +83,16 @@ Alamat I2C Si5351: **0x60**.
 
 ### Strategi driver Si5351 (`si5351.hpp`)
 
-- **PLLA VCO dikunci tetap di 900 MHz** (feedback divider = 900/25 = 36,
-  integer, dari kristal 25 MHz).
-- Frekuensi output diatur lewat **MultiSynth** `VCO / Fout`
-  (fraksional bila perlu, resolusi ≈ 0.1 Hz).
-- API: `init()`, `set_frequency(freq_hz, clk=0)`, `frequency()`.
+- **LO (CLK0):** **PLLA VCO dikunci tetap di 900 MHz** (feedback divider =
+  900/25 = 36, integer, dari kristal 25 MHz). Frekuensi diatur lewat
+  **MultiSynth** `VCO / Fout` (fraksional bila perlu, resolusi ≈ 0.1 Hz).
+- **Carrier (CLK1/CLK2):** PLLB dengan divider **integer N** (9–127) sehingga
+  `VCO = N × Fout`; register phase-offset `CLK2 = N` memberi **90° tepat** (trik
+  AN619). Karena itu carrier dibatasi ≈ **4.8 – 100 MHz**.
+- Ini menjaga LO dan carrier pada **PLL terpisah** sehingga tuning tidak
+  mengganggu fasa carrier.
+- API: `init()`, `set_frequency(freq_hz, clk=0)`, `set_carrier(freq_hz, enable)`,
+  `frequency()`.
 
 ### Alur `app_main()`
 
@@ -128,6 +138,9 @@ M5Cardputer-Si5351-VFO/
 | `m`                 | Memori **berikutnya** (memuat frekuensinya)   |
 | `n`                 | Memori **sebelumnya**                         |
 | `s`                 | **Simpan** frekuensi saat ini ke memori aktif |
+| `c`                 | **Siklus carrier**: OFF → USB → LSB → OFF      |
+| `o`                 | Set **IF offset** (Hz, boleh negatif lalu Enter) |
+| `i`                 | Set **frekuensi carrier/BFO** (Hz lalu Enter)  |
 
 Aransemen fisik `, . /` (bawah) dan `;` (atas) membentuk pola D-pad.
 

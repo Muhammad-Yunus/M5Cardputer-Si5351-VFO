@@ -7,9 +7,14 @@
 
 // Minimal Si5351A driver for the VFO.
 //
-// Strategy: use PLLA with a fixed VCO of 900 MHz (feedback divider = 900/25 = 36,
-// integer) and program MultiSynth <clk> as VCO / Fout (fractional when needed).
-// Covers roughly 1 MHz .. 150 MHz on a single output, which is plenty for an HF VFO.
+//   CLK0 : local oscillator (LO)    - PLLA, fixed 900 MHz VCO + fractional MS.
+//   CLK1 : carrier / BFO "I"        }  PLLB, integer MultiSynth, CLK2 shifted
+//   CLK2 : carrier / BFO "Q"        }  90 degrees via the phase-offset register.
+//
+// The quadrature carrier uses the AN619 phase-offset trick: with an integer
+// MultiSynth divider N (9..127) shared by two outputs on the same PLL, writing N
+// into one output's phase-offset register yields an exact 90 degree shift. This
+// limits the carrier to roughly 4.8 .. 100 MHz.
 class Si5351 {
 public:
     static constexpr uint8_t DEFAULT_ADDRESS = 0x60;
@@ -21,7 +26,8 @@ public:
     // Basic power-up: disable outputs, power down all clock drivers, select the
     // crystal as PLL source, disable spread spectrum, set crystal load, reset PLLs.
     bool init() {
-        if (!write_reg(3, 0xFF)) {                 // power down all outputs (OEB)
+        oeb_ = 0xFF;
+        if (!write_reg(3, oeb_)) {                 // disable all outputs (OEB)
             return false;
         }
         for (uint8_t r = 16; r <= 23; ++r) {       // power down every CLKx driver
@@ -44,54 +50,88 @@ public:
         return true;
     }
 
-    // Set the output frequency (Hz) on the given clock (0..2).
+    // Local oscillator (Hz) on the given clock (0..2, default CLK0): fixed
+    // 900 MHz PLLA VCO + a fractional MultiSynth divider.
     bool set_frequency(uint32_t freq_hz, uint8_t clk = 0) {
         if (freq_hz < 1000000UL || freq_hz > 150000000UL || clk > 2) {
             return false;
         }
-
-        // Fixed VCO = 900 MHz (PLLA feedback = 36, integer).
         const uint32_t vco_hz = 900000000UL;
-        const uint32_t pll_a = vco_hz / DEFAULT_XTAL_HZ; // 36
-        if (!write_pll(26, pll_a, 0, 1)) {               // PLLA regs 26..33
+        uint32_t a = 0, b = 0, c = 0;
+        divider(DEFAULT_XTAL_HZ, vco_hz, a, b, c);     // PLLA feedback = 36
+        if (!write_pll(26, a, b, c)) {                 // PLLA regs 26..33
             return false;
         }
-
-        // MultiSynth divider = VCO / Fout = a + b/c
-        uint32_t a = vco_hz / freq_hz;
-        uint32_t rem = vco_hz % freq_hz;
-        uint32_t b = 0;
-        uint32_t c = 1;
-        if (rem != 0) {
-            // 20-bit fractional denominator for good resolution (~0.1 Hz step here).
-            c = 1048575u;
-            b = static_cast<uint32_t>((static_cast<uint64_t>(rem) * c + freq_hz / 2) / freq_hz);
-            if (b >= c) {
-                a += b / c;
-                b %= c;
-            }
-        }
+        divider(vco_hz, freq_hz, a, b, c);             // MultiSynth = VCO / Fout
         const uint8_t ms_base = static_cast<uint8_t>(42 + clk * 8);
         if (!write_ms(ms_base, a, b, c)) {
             return false;
         }
-
-        // CLKx control: source = MSx from PLLA, 2 mA drive; integer mode if b == 0
-        // (0x40 = MSx_INT). Bits: [3:2]=11 (MSx), [5]=0 (PLLA).
+        // CLKx control: source = MSx from PLLA, 2 mA drive; integer mode if b == 0.
         uint8_t ctrl = 0x0C | ((b == 0) ? 0x40 : 0x00);
         if (!write_reg(static_cast<uint8_t>(16 + clk), ctrl)) {
             return false;
         }
-
-        // Reset both PLLs so PLLA locks to the new configuration, then enable output.
-        if (!write_reg(177, 0xA0)) {
+        if (!write_reg(177, 0x20)) {                   // reset PLLA so it locks
             return false;
         }
-        if (!write_reg(3, static_cast<uint8_t>(0xFF & ~(1u << clk)))) {
+        if (!enable_clock(clk)) {
             return false;
         }
-
         freq_hz_ = freq_hz;
+        return true;
+    }
+
+    // Carrier / BFO on CLK1 (I) and CLK2 (Q), 90 degrees apart. enable = false
+    // powers the two outputs back down.
+    bool set_carrier(uint32_t freq_hz, bool enable) {
+        if (!enable) {
+            if (!write_reg(17, 0x80) || !write_reg(18, 0x80)) {
+                return false;
+            }
+            return disable_clock(1) && disable_clock(2);
+        }
+        if (freq_hz < 4800000UL || freq_hz > 100000000UL) {
+            return false;
+        }
+        // Integer divider N in [9,127] so that VCO = N * f lands in 600..900 MHz,
+        // and the output phase-offset register (max 127) can express 90 degrees.
+        uint32_t n = 900000000UL / freq_hz;
+        if (n < 9) {
+            n = 9;
+        }
+        if (n > 127) {
+            n = 127;
+        }
+        const uint32_t vco_hz = n * freq_hz;
+        uint32_t a = 0, b = 0, c = 0;
+        divider(DEFAULT_XTAL_HZ, vco_hz, a, b, c);     // PLLB feedback
+        if (!write_pll(34, a, b, c)) {                 // PLLB regs 34..41
+            return false;
+        }
+        if (!write_ms(50, n, 0, 1)) {                  // MS1 (I), integer divider
+            return false;
+        }
+        if (!write_ms(58, n, 0, 1)) {                  // MS2 (Q), integer divider
+            return false;
+        }
+        if (!write_reg(166, 0)) {                      // CLK1 phase offset = 0
+            return false;
+        }
+        if (!write_reg(167, static_cast<uint8_t>(n & 0x7F))) { // CLK2 = 90 deg
+            return false;
+        }
+        // CLK1/CLK2: PLLB (bit5) + MSx select (0x0C) + 8 mA (0x03), fractional
+        // mode (MSx_INT = 0, required for the phase offset to take effect).
+        if (!write_reg(17, 0x2F) || !write_reg(18, 0x2F)) {
+            return false;
+        }
+        if (!write_reg(177, 0x80)) {                   // reset PLLB to latch phase
+            return false;
+        }
+        if (!enable_clock(1) || !enable_clock(2)) {
+            return false;
+        }
         return true;
     }
 
@@ -103,52 +143,67 @@ private:
         return i2c_.write(address_, data, 2);
     }
 
-    // Assemble MultiSynth registers from divider a + b/c and write the 8-byte block.
+    // Output enable register (3) shadow: a set bit *disables* the matching clock.
+    bool enable_clock(uint8_t clk) {
+        oeb_ = static_cast<uint8_t>(oeb_ & ~(1u << clk));
+        return write_reg(3, oeb_);
+    }
+    bool disable_clock(uint8_t clk) {
+        oeb_ = static_cast<uint8_t>(oeb_ | (1u << clk));
+        return write_reg(3, oeb_);
+    }
+
+    // Decompose ref / out into a MultiSynth divider a + b/c (c = 1 when exact).
+    static void divider(uint32_t ref_hz, uint32_t out_hz, uint32_t &a, uint32_t &b,
+                        uint32_t &c) {
+        a = ref_hz / out_hz;
+        uint32_t rem = ref_hz % out_hz;
+        b = 0;
+        c = 1;
+        if (rem != 0) {
+            c = 1048575u; // 20-bit denominator for ~sub-Hz resolution here
+            b = static_cast<uint32_t>((static_cast<uint64_t>(rem) * c + out_hz / 2) /
+                                      out_hz);
+            if (b >= c) {
+                a += b / c;
+                b %= c;
+            }
+        }
+    }
+
+    // Assemble a MultiSynth/PLL divider (a + b/c) and write the 8-byte register block.
     bool write_pll(uint8_t base, uint32_t a, uint32_t b, uint32_t c) {
-        uint32_t p1 = 128u * a + (128u * b) / c - 512u;
-        uint32_t p2 = 128u * b - c * ((128u * b) / c);
-        uint32_t p3 = c;
-        uint8_t regs[8] = {
-            static_cast<uint8_t>((p3 >> 8) & 0xFF),
-            static_cast<uint8_t>(p3 & 0xFF),
-            static_cast<uint8_t>((p1 >> 16) & 0x03),
-            static_cast<uint8_t>((p1 >> 8) & 0xFF),
-            static_cast<uint8_t>(p1 & 0xFF),
-            static_cast<uint8_t>(((p3 >> 12) & 0xF0) | ((p2 >> 16) & 0x0F)),
-            static_cast<uint8_t>((p2 >> 8) & 0xFF),
-            static_cast<uint8_t>(p2 & 0xFF),
-        };
-        return write_block(base, regs, 8);
+        return write_div(base, a, b, c, 0);
     }
-
-    // Same equations, but reg[2] holds R<n>_DIV[2:0] | P1[17:16] (rDiv = 0 here).
     bool write_ms(uint8_t base, uint32_t a, uint32_t b, uint32_t c) {
+        return write_div(base, a, b, c, 0);
+    }
+
+    // regs[2] holds R<n>_DIV[2:0] | P1[17:16] (rDiv = 0 here).
+    bool write_div(uint8_t base, uint32_t a, uint32_t b, uint32_t c, uint8_t rdiv) {
         uint32_t p1 = 128u * a + (128u * b) / c - 512u;
         uint32_t p2 = 128u * b - c * ((128u * b) / c);
         uint32_t p3 = c;
         uint8_t regs[8] = {
             static_cast<uint8_t>((p3 >> 8) & 0xFF),
             static_cast<uint8_t>(p3 & 0xFF),
-            static_cast<uint8_t>((p1 >> 16) & 0x03),
+            static_cast<uint8_t>((rdiv & 0x07) | ((p1 >> 16) & 0x03)),
             static_cast<uint8_t>((p1 >> 8) & 0xFF),
             static_cast<uint8_t>(p1 & 0xFF),
             static_cast<uint8_t>(((p3 >> 12) & 0xF0) | ((p2 >> 16) & 0x0F)),
             static_cast<uint8_t>((p2 >> 8) & 0xFF),
             static_cast<uint8_t>(p2 & 0xFF),
         };
-        return write_block(base, regs, 8);
-    }
-
-    bool write_block(uint8_t base, const uint8_t *data, size_t len) {
         uint8_t buf[9];
         buf[0] = base;
-        for (size_t i = 0; i < len; ++i) {
-            buf[i + 1] = data[i];
+        for (size_t i = 0; i < 8; ++i) {
+            buf[i + 1] = regs[i];
         }
-        return i2c_.write(address_, buf, len + 1);
+        return i2c_.write(address_, buf, 9);
     }
 
     espp::I2c &i2c_;
     uint8_t address_;
+    uint8_t oeb_ = 0xFF;
     uint32_t freq_hz_ = 0;
 };

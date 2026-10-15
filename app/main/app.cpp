@@ -1,3 +1,4 @@
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -23,6 +24,9 @@
 //     ;  = step up          .  = step down
 //     0-9 = direct frequency entry (Hz), Enter = apply, `(Esc) = cancel
 //     m  = next memory      n  = previous memory  s = store into memory
+//     c  = cycle carrier (OFF -> USB -> LSB)   o = set IF offset (Hz, +/-)
+//     i  = set carrier/BFO frequency (Hz)
+//   LO output = displayed frequency + IF offset; carrier I/Q on CLK1/CLK2.
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -34,6 +38,11 @@ constexpr int32_t STEP_HZ[NUM_STEPS] = {10, 100, 1000, 10000, 100000, 1000000, 1
 constexpr const char *STEP_NAME[NUM_STEPS] = {"10Hz", "100Hz", "1kHz", "10kHz",
                                               "100kHz", "1MHz", "10MHz"};
 constexpr int NUM_MEM = 20;
+
+// Carrier / BFO (CLK1 = I, CLK2 = Q). USB/LSB shift the BFO off the carrier.
+constexpr int32_t SB_OFFSET_HZ = 1500;
+constexpr int32_t CAR_MIN_FREQ = 4800000;   // quadrature phase trick lower bound
+constexpr int32_t CAR_MAX_FREQ = 100000000; // ... upper bound
 
 // Layout (240 x 135)
 constexpr int W = 240;
@@ -59,13 +68,19 @@ struct KeyMsg {
   bool shift;
 };
 
+// What the numeric keypad is currently editing (none == normal tuning).
+enum EntryTarget { ENTRY_NONE, ENTRY_FREQ, ENTRY_IF, ENTRY_CAR };
+
 struct VfoState {
   int32_t freq = 7074000; // start at 7.074 MHz
   int step_index = 2;     // 1 kHz
   int mem_index = 0;
   int32_t memories[NUM_MEM] = {};
-  bool entering = false;
+  EntryTarget entry_target = ENTRY_NONE;
   std::string entry;
+  int32_t if_offset = 0;   // added to the display frequency to form the LO
+  int32_t car_freq = 10000000; // carrier / BFO centre frequency (10 MHz)
+  int car_mode = 0;        // 0 = off, 1 = CW, 2 = USB, 3 = LSB
 };
 
 VfoState vfo;
@@ -77,6 +92,10 @@ lv_obj_t *freq_row = nullptr;
 lv_obj_t *lbl_unit = nullptr;
 lv_obj_t *lbl_step = nullptr;
 lv_obj_t *lbl_mem = nullptr;
+lv_obj_t *lbl_aux = nullptr;
+lv_obj_t *car_chip = nullptr;
+lv_obj_t *wave_line = nullptr;
+lv_obj_t *lbl_car = nullptr;
 lv_obj_t *lbl_hint = nullptr;
 lv_obj_t *lbl_entry = nullptr;
 lv_obj_t *pointer_line = nullptr;
@@ -84,6 +103,13 @@ lv_obj_t *tick_lines[NTICKS] = {};
 lv_obj_t *tick_labels[NTICKS] = {};
 lv_point_precise_t tick_pts[NTICKS][2] = {};
 lv_point_precise_t pointer_pts[2] = {};
+
+// Little sine-wave glyph for the carrier chip (drawn, not a font symbol).
+constexpr int WAVE_W = 22;
+constexpr int WAVE_H = 14;
+constexpr int WAVE_N = 13;
+constexpr float WAVE_PI = 3.14159265f;
+lv_point_precise_t wave_pts[WAVE_N] = {};
 
 // ---- helpers --------------------------------------------------------------
 
@@ -142,6 +168,29 @@ void format_tick(int32_t f, int32_t minor, char *buf, size_t n) {
   snprintf(buf, n, "%d.%dM", (int)(f / 1000000), (int)((f % 1000000) / 100000));
 }
 
+// The LO actually runs at (display frequency + IF offset); the display never
+// shows the offset, matching the reference VFO behaviour.
+void apply_lo() {
+  if (syn) {
+    syn->set_frequency((uint32_t)(vfo.freq + vfo.if_offset), 0);
+  }
+}
+
+// Carrier / BFO: CW is the bare carrier, USB/LSB shift it +/- 1500 Hz, OFF
+// disables the carrier output entirely.
+void apply_carrier() {
+  if (!syn) {
+    return;
+  }
+  int32_t f = vfo.car_freq;
+  if (vfo.car_mode == 2) {
+    f += SB_OFFSET_HZ;
+  } else if (vfo.car_mode == 3) {
+    f -= SB_OFFSET_HZ;
+  }
+  syn->set_carrier((uint32_t)f, vfo.car_mode != 0);
+}
+
 void set_freq(int32_t f) {
   if (f < MIN_FREQ) {
     f = MIN_FREQ;
@@ -150,9 +199,20 @@ void set_freq(int32_t f) {
     f = MAX_FREQ;
   }
   vfo.freq = f;
-  if (syn) {
-    syn->set_frequency((uint32_t)f, 0);
+  apply_lo();
+}
+
+// Render the current numeric entry, grouped for plain frequencies and with an
+// optional leading '-' preserved when editing the signed IF offset.
+std::string entry_text() {
+  const std::string &e = vfo.entry;
+  if (vfo.entry_target == ENTRY_FREQ) {
+    return group_digits(e);
   }
+  if (!e.empty() && e[0] == '-') {
+    return "-" + group_digits(e.substr(1));
+  }
+  return group_digits(e);
 }
 
 void update_scale() {
@@ -189,11 +249,38 @@ void update_scale() {
   }
 }
 
+const char *car_mode_name() {
+  switch (vfo.car_mode) {
+  case 1:
+    return "CW";
+  case 2:
+    return "USB";
+  case 3:
+    return "LSB";
+  default:
+    return "OFF";
+  }
+}
+
+// Colour of the carrier chip, per mode.
+uint32_t car_mode_color() {
+  switch (vfo.car_mode) {
+  case 1:
+    return 0x66CCFF; // CW - cyan
+  case 2:
+    return 0x33CC66; // USB - green
+  case 3:
+    return 0xFF8C1A; // LSB - orange
+  default:
+    return 0x808080; // OFF - grey
+  }
+}
+
 void update_ui() {
   char buf[24];
-  if (vfo.entering) {
-    std::string grouped = group_digits(vfo.entry);
-    snprintf(buf, sizeof(buf), "%s_", grouped.c_str());
+  if (vfo.entry_target != ENTRY_NONE) {
+    std::string shown = entry_text();
+    snprintf(buf, sizeof(buf), "%s_", shown.c_str());
     lv_label_set_text(lbl_freq, buf);
   } else {
     format_freq(vfo.freq, buf, sizeof(buf));
@@ -202,6 +289,20 @@ void update_ui() {
   lv_label_set_text_fmt(lbl_step, "STEP %s", STEP_NAME[vfo.step_index]);
   lv_label_set_text_fmt(lbl_mem, "MEM %02d%s", vfo.mem_index + 1,
                         vfo.memories[vfo.mem_index] ? "*" : " ");
+  lv_label_set_text_fmt(lbl_aux, "IF%+ld", (long)vfo.if_offset);
+  lv_label_set_text(lbl_car, car_mode_name());
+  lv_color_t car_col = lv_color_hex(car_mode_color());
+  lv_obj_set_style_line_color(wave_line, car_col, 0);
+  lv_obj_set_style_text_color(lbl_car, car_col, 0);
+  lv_obj_set_style_border_color(car_chip, car_col, 0);
+  lv_obj_set_style_bg_color(car_chip, car_col, 0);
+  lv_obj_set_style_bg_opa(car_chip, vfo.car_mode ? LV_OPA_20 : LV_OPA_TRANSP, 0);
+  // OFF really means no carrier, so don't draw any waveform for it.
+  if (vfo.car_mode == 0) {
+    lv_obj_add_flag(wave_line, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_remove_flag(wave_line, LV_OBJ_FLAG_HIDDEN);
+  }
   update_scale();
 }
 
@@ -213,6 +314,37 @@ void load_memory() {
   if (vfo.memories[vfo.mem_index] != 0) {
     set_freq(vfo.memories[vfo.mem_index]);
   }
+}
+
+// Commit the number currently in the entry buffer to whatever is being edited.
+void apply_entry() {
+  if (vfo.entry.empty() || vfo.entry == "-") {
+    vfo.entry_target = ENTRY_NONE;
+    return;
+  }
+  int32_t val = (int32_t)strtol(vfo.entry.c_str(), nullptr, 10);
+  switch (vfo.entry_target) {
+  case ENTRY_FREQ:
+    set_freq(val);
+    break;
+  case ENTRY_IF:
+    vfo.if_offset = val;
+    apply_lo();
+    break;
+  case ENTRY_CAR:
+    if (val < CAR_MIN_FREQ) {
+      val = CAR_MIN_FREQ;
+    }
+    if (val > CAR_MAX_FREQ) {
+      val = CAR_MAX_FREQ;
+    }
+    vfo.car_freq = val;
+    apply_carrier();
+    break;
+  default:
+    break;
+  }
+  vfo.entry_target = ENTRY_NONE;
 }
 
 // ---- key handling ---------------------------------------------------------
@@ -243,29 +375,33 @@ void handle_key(const KeyMsg &msg) {
     }
   }
 
-  // direct-entry mode: gather digits until Enter / Esc
-  if (vfo.entering) {
+  // numeric-entry mode: gather digits (plus a leading '-' for the IF offset)
+  if (vfo.entry_target != ENTRY_NONE) {
     if (c >= '0' && c <= '9') {
-      if (vfo.entry.size() < 9) {
+      if (vfo.entry.size() < 10) {
         vfo.entry.push_back(c);
       }
+    } else if (c == '-' && vfo.entry_target == ENTRY_IF && vfo.entry.empty()) {
+      vfo.entry.push_back('-');
     } else if (c == '\b') {
       if (!vfo.entry.empty()) {
         vfo.entry.pop_back();
       }
     } else if (c == '\n') {
-      if (vfo.entry.empty()) {
-        vfo.entering = false;
-      } else {
-        set_freq((int32_t)strtol(vfo.entry.c_str(), nullptr, 10));
-        vfo.entering = false;
-      }
+      apply_entry();
     } else if (special == SK::ESC || c == '`') {
-      vfo.entering = false;
+      vfo.entry_target = ENTRY_NONE;
     }
     update_ui();
-    lv_label_set_text(lbl_hint,
-                      vfo.entering ? "Ketik Hz, Enter=OK, Esc=batal" : "");
+    if (vfo.entry_target == ENTRY_FREQ) {
+      lv_label_set_text(lbl_hint, "Hz, Enter=OK, Esc=batal");
+    } else if (vfo.entry_target == ENTRY_IF) {
+      lv_label_set_text(lbl_hint, "IF Hz, Enter=OK, Esc=batal");
+    } else if (vfo.entry_target == ENTRY_CAR) {
+      lv_label_set_text(lbl_hint, "CAR Hz, Enter=OK, Esc=batal");
+    } else {
+      lv_label_set_text(lbl_hint, "");
+    }
     return;
   }
 
@@ -297,9 +433,21 @@ void handle_key(const KeyMsg &msg) {
   case 's':
     memorize();
     break;
+  case 'c': // cycle carrier: OFF -> USB -> LSB -> OFF
+    vfo.car_mode = (vfo.car_mode + 1) % 4;
+    apply_carrier();
+    break;
+  case 'o': // edit the IF offset (Hz, signed)
+    vfo.entry_target = ENTRY_IF;
+    vfo.entry.clear();
+    break;
+  case 'i': // edit the carrier / BFO centre frequency
+    vfo.entry_target = ENTRY_CAR;
+    vfo.entry.clear();
+    break;
   default:
     if (c >= '0' && c <= '9') {
-      vfo.entering = true;
+      vfo.entry_target = ENTRY_FREQ;
       vfo.entry.clear();
       vfo.entry.push_back(c);
     } else {
@@ -393,6 +541,35 @@ extern "C" void app_main(void) {
   lv_obj_set_style_text_color(lbl_mem, lv_color_hex(COL_STATUS), 0);
   lv_obj_align(lbl_mem, LV_ALIGN_TOP_RIGHT, -4, 2);
 
+  // carrier / BFO badge (pill chip): [icon] USB|LSB|OFF, colour-coded
+  car_chip = lv_obj_create(scr);
+  lv_obj_set_size(car_chip, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_clear_flag(car_chip, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_radius(car_chip, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_border_width(car_chip, 1, 0);
+  lv_obj_set_style_pad_hor(car_chip, 6, 0);
+  lv_obj_set_style_pad_ver(car_chip, 0, 0);
+  lv_obj_set_style_pad_column(car_chip, 3, 0);
+  lv_obj_set_flex_flow(car_chip, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(car_chip, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_align(car_chip, LV_ALIGN_TOP_MID, 0, 2);
+
+  for (int i = 0; i < WAVE_N; i++) {
+    float t = (float)i / (float)(WAVE_N - 1);
+    wave_pts[i].x = (lv_coord_t)(t * (float)WAVE_W + 0.5f);
+    wave_pts[i].y =
+        (lv_coord_t)((float)WAVE_H / 2.0f - 4.0f * sinf(2.0f * WAVE_PI * t) + 0.5f);
+  }
+  wave_line = lv_line_create(car_chip);
+  lv_obj_set_size(wave_line, WAVE_W, WAVE_H);
+  lv_line_set_points(wave_line, wave_pts, WAVE_N);
+  lv_obj_set_style_line_width(wave_line, 2, 0);
+
+  lbl_car = lv_label_create(car_chip);
+  lv_obj_set_style_text_font(lbl_car, &lv_font_montserrat_14, 0);
+  lv_label_set_text(lbl_car, "OFF");
+
   // frequency readout: big digits + a half-size "Hz" unit sat on the baseline
   freq_row = lv_obj_create(scr);
   lv_obj_set_size(freq_row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -403,7 +580,7 @@ extern "C" void app_main(void) {
   lv_obj_clear_flag(freq_row, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_flex_flow(freq_row, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(freq_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
-  lv_obj_align(freq_row, LV_ALIGN_TOP_MID, 0, 20);
+  lv_obj_align(freq_row, LV_ALIGN_TOP_MID, 0, 24);
 
   lbl_freq = lv_label_create(freq_row);
   lv_obj_set_style_text_font(lbl_freq, &lv_font_montserrat_28, 0);
@@ -437,18 +614,25 @@ extern "C" void app_main(void) {
   pointer_pts[1] = {(lv_coord_t)SCALE_CENTER_X, TICK_MAJOR_BOTTOM + 2};
   lv_line_set_points(pointer_line, pointer_pts, 2);
 
+  // bottom row: IF/carrier status on the left, key hint on the right
+  lbl_aux = lv_label_create(scr);
+  lv_obj_set_style_text_font(lbl_aux, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(lbl_aux, lv_color_hex(COL_STATUS), 0);
+  lv_obj_align(lbl_aux, LV_ALIGN_BOTTOM_LEFT, 4, -2);
+
   lbl_hint = lv_label_create(scr);
   lv_obj_set_style_text_font(lbl_hint, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(lbl_hint, lv_color_hex(COL_TICK_MINOR), 0);
-  lv_obj_align(lbl_hint, LV_ALIGN_BOTTOM_MID, 0, -2);
-  lv_label_set_text(lbl_hint, ",/ = tune   ;. = step");
+  lv_obj_align(lbl_hint, LV_ALIGN_BOTTOM_RIGHT, -4, -2);
+  lv_label_set_text(lbl_hint, ",/ tune  ;. step  c car");
 
   // --- keyboard ---
   cardputer.initialize_keyboard(on_key);
 
-  // --- push the initial frequency to the Si5351 and draw everything ---
+  // --- push the initial LO (and disable the carrier) and draw everything ---
   if (si_ok) {
-    syn->set_frequency((uint32_t)vfo.freq, 0);
+    apply_lo();
+    apply_carrier();
   }
   update_ui();
 
@@ -463,8 +647,10 @@ extern "C" void app_main(void) {
     uint32_t now = xTaskGetTickCount();
     if (now - last_log > pdMS_TO_TICKS(3000)) {
       last_log = now;
-      printf("VFO %ld Hz  step=%s  mem=%02d  si5351=%s\n", (long)vfo.freq,
-             STEP_NAME[vfo.step_index], vfo.mem_index + 1, si_ok ? "OK" : "FAIL");
+      printf("VFO %ld Hz  step=%s  mem=%02d  IF%+ld  car=%s@%ld  si5351=%s\n",
+             (long)vfo.freq, STEP_NAME[vfo.step_index], vfo.mem_index + 1,
+             (long)vfo.if_offset, car_mode_name(), (long)vfo.car_freq,
+             si_ok ? "OK" : "FAIL");
     }
     vTaskDelay(pdMS_TO_TICKS(20));
   }
