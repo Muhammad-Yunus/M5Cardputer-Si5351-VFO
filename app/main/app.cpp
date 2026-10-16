@@ -33,7 +33,7 @@
 namespace {
 
 constexpr int32_t MIN_FREQ = 1000000;    // 1 MHz
-constexpr int32_t MAX_FREQ = 150000000;  // 150 MHz
+constexpr int32_t MAX_FREQ = 200000000;  // 200 MHz (Si5351 VHF ceiling)
 constexpr int NUM_STEPS = 7;
 constexpr int32_t STEP_HZ[NUM_STEPS] = {10, 100, 1000, 10000, 100000, 1000000, 10000000};
 constexpr const char *STEP_NAME[NUM_STEPS] = {"10Hz", "100Hz", "1kHz", "10kHz",
