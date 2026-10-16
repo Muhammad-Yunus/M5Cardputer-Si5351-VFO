@@ -24,6 +24,8 @@ Cardputer berperan sebagai *controller* + *display* + *keypad*, sedangkan modul
 
 <p align="center"><img src="docs/banner.jpg" alt="banner" style="max-width:60%"></p>
 
+<p align="center"><img src="docs/final_look.png" alt="Final look (3 sudut)" style="max-width:80%"></p>
+
 ---
 
 ## Fitur
