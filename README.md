@@ -30,18 +30,24 @@ Cardputer berperan sebagai *controller* + *display* + *keypad*, sedangkan modul
 
 - **Rentang output 1 MHz – 150 MHz** pada `CLK0` Si5351 (LO).
 - **Tuning bertahap (step):** 10 Hz, 100 Hz, 1 kHz, 10 kHz, 100 kHz, 1 MHz, 10 MHz.
-- **20 memori** frekuensi (next/prev + simpan). 13 slot pertama sudah diisi
-  preset band HF/VHF umum (semua ≤ 150 MHz).
+- **20 slot memori**: 13 preset band HF/VHF (semua ≤ 150 MHz) + 7 slot user
+  dengan label 4 karakter. Navigasi `m`/`n`, simpan dengan `s`.
 - **Entry frekuensi langsung** (ketik dalam Hz lalu Enter).
 - **IF offset** yang bisa diatur: LO = frekuensi tampil + offset, sedangkan
   display tetap menunjukkan frekuensi sinyal (untuk receiver superheterodyne).
-- **Carrier / BFO I/Q** pada `CLK1` (I) dan `CLK2` (Q), 90° terpisah, dengan
-  mode **USB / LSB** (±1500 Hz) dan on/off.
+- **Carrier / BFO I/Q** pada `CLK1` (I) dan `CLK2` (Q), 90° terpisah lewat trik
+  phase-offset AN619; mode **OFF / CW / USB / LSB**, dan toggle fasa CH2
+  **90° (quadrature) ↔ 0° (sefase)** dengan `p`.
+- **Indikator kanal** CH0/CH1/CH2 di baris atas + indikator mode carrier.
+- **Baterai**: ikon + persentase di status bar (update tiap 2 detik).
+- **Overlay bantuan** (`h`) berisi daftar tombol.
+- **Tema gelap ↔ terang** (`t`) dengan membalik warna panel ST7789.
 - **Tampilan retro:** angka frekuensi besar + **skala dial bergerak** dengan
   pointer tetap di tengah + tick minor/major + label amber.
-- **Status bar:** step aktif (kiri) dan nomor memori (kanan).
+- **Status bar:** IF offset (kiri) + ikon baterai & tombol bantuan (kanan).
 - **LED RGB** internal diset warna amber hangat (meniru lampu dial).
 - Update frekuensi **real-time** ke Si5351 setiap kali diubah.
+- Auto-retry inisialisasi Si5351 tiap 500 ms sampai modul menjawab.
 
 ---
 
@@ -99,7 +105,8 @@ Alamat I2C Si5351: **0x60**.
   AN619). Karena itu carrier dibatasi ≈ **4.8 – 100 MHz**.
 - Ini menjaga LO dan carrier pada **PLL terpisah** sehingga tuning tidak
   mengganggu fasa carrier.
-- API: `init()`, `set_frequency(freq_hz, clk=0)`, `set_carrier(freq_hz, enable)`,
+- API: `init()`, `set_frequency(freq_hz, clk=0)`,
+  `set_carrier(freq_hz, enable, quadrature=true)`, `enable_clock(clk)`,
   `frequency()`.
 
 ### Alur `app_main()`
@@ -107,11 +114,12 @@ Alamat I2C Si5351: **0x60**.
 1. Inisialisasi LCD, display (LVGL), brightness, dan LED.
 2. `cardputer.variant()` → mendeteksi varian & melepas I2C port 0.
 3. Buat bus I2C Grove + Si5351, lalu set frekuensi awal (7.074 MHz).
-4. Bangun UI VFO (readout, skala dial, status bar).
+4. Bangun UI VFO (baris kanal, readout, skala dial, status bar, baterai,
+   overlay bantuan, popup simpan).
 5. `initialize_keyboard(callback)` — callback hanya memasukkan event ke
    `key_queue` (aman dari konteks task keyboard).
-6. **Loop utama:** `lv_timer_handler()` + proses `key_queue` + log status
-   periodik 3 detik.
+6. **Loop utama:** `lv_timer_handler()` + proses `key_queue` + update baterai
+   tiap 2 detik + retry Si5351 tiap 500 ms + log status periodik 3 detik.
 
 ---
 
@@ -146,11 +154,12 @@ M5Cardputer-Si5351-VFO/
 | `m`                 | Memori **berikutnya** (memuat frekuensinya)   |
 | `n`                 | Memori **sebelumnya**                         |
 | `s`                 | **Simpan**. Frekuensi preset: langsung tersimpan. Frekuensi bebas: muncul popup nama 4 karakter (0-9/A-Z), `Enter` simpan ke slot user kosong, `Esc` batal |
-| `c`                 | **Siklus carrier**: OFF → USB → LSB → OFF      |
+| `c`                 | **Siklus carrier**: OFF → CW → USB → LSB → OFF |
 | `o`                 | Set **IF offset** (Hz, boleh negatif lalu Enter) |
 | `i`                 | Set **frekuensi carrier/BFO** (Hz lalu Enter)  |
 | `p`                 | Toggle fasa CH2: **90°** (quadrature I/Q) ↔ **0°** (sefase). Label berubah `CH2 (Q)` ↔ `CH2` |
 | `t`                 | Toggle tema **gelap ↔ terang** (membalik warna panel lewat perintah INVON/INVOFF ST7789) |
+| `h`                 | Toggle **overlay bantuan** (daftar tombol)    |
 
 Aransemen fisik `, . /` (bawah) dan `;` (atas) membentuk pola D-pad.
 
@@ -190,8 +199,10 @@ Keluar dari monitor dengan `Ctrl + ]`.
 
 ## Spesifikasi Sinyal Output
 
-- **Output:** `CLK0` Si5351 (kotak, 50 Ω drive).
-- **Rentang:** 1 MHz – 150 MHz (dibatasi di firmware).
+- **Output utama:** `CLK0` = LO (sesuai frekuensi tampil + IF offset).
+- **Carrier/BFO:** `CLK1` = I, `CLK2` = Q (aktif bila carrier mode CW/USB/LSB).
+- **Rentang CLK0:** 1 MHz – 150 MHz (dibatasi firmware).
+- **Rentang carrier:** ~4.8 MHz – 100 MHz (dibatasi metode quadrature integer-N).
 - **Referensi:** kristal 25 MHz (asumsi modul Si5351A generik).
 - **Resolusi:** ~0.1 Hz (MultiSynth fraksional, penyebut 20-bit).
 
