@@ -398,28 +398,19 @@ void update_ui() {
   lv_label_set_text(lbl_step, STEP_NAME[vfo.step_index]);
   // Memory chip: preset slots show the band alias, the rest the slot number.
   // A trailing '*' marks a populated slot the dial has moved away from.
-  bool mem_dirty = false;
-  bool show_alias = false;
   if (vfo.mem_index < NUM_PRESETS) {
     int32_t center = MEM_PRESET_HZ[vfo.mem_index];
-    mem_dirty = (vfo.freq != center);
-    // show alias only if we're close to the preset band center (tolerance ~2% or within a reasonable window)
     int32_t tol = center / 25; // ~4%
     if (tol < 10000) tol = 10000;
     if (tol > 50000) tol = 50000;
-    if (abs(vfo.freq - center) <= tol) {
-      show_alias = true;
+    if (llabs((long long)vfo.freq - (long long)center) <= tol) {
+      lv_label_set_text(lbl_mem, MEM_ALIAS[vfo.mem_index]);
+    } else {
+      lv_label_set_text(lbl_mem, "---");
     }
   } else {
-    mem_dirty = (vfo.memories[vfo.mem_index] != 0 && vfo.memories[vfo.mem_index] != vfo.freq);
-    show_alias = false;
-  }
-  if (vfo.mem_index < NUM_PRESETS && show_alias) {
-    lv_label_set_text_fmt(lbl_mem, "%s%s", MEM_ALIAS[vfo.mem_index],
-                          mem_dirty ? "*" : " ");
-  } else if (vfo.mem_index < NUM_PRESETS && !show_alias) {
-    lv_label_set_text_fmt(lbl_mem, "---%s", mem_dirty ? "*" : " ");
-  } else {
+    bool mem_dirty = (vfo.memories[vfo.mem_index] != 0 &&
+                      vfo.memories[vfo.mem_index] != vfo.freq);
     lv_label_set_text_fmt(lbl_mem, "%02d%s", vfo.mem_index + 1,
                           mem_dirty ? "*" : " ");
   }
