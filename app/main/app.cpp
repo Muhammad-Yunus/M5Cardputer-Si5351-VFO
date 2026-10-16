@@ -33,7 +33,7 @@
 namespace {
 
 constexpr int32_t MIN_FREQ = 1000000;    // 1 MHz
-constexpr int32_t MAX_FREQ = 200000000;  // 200 MHz (Si5351 VHF ceiling)
+constexpr int32_t MAX_FREQ = 150000000;  // 150 MHz (Si5351 usable ceiling here)
 constexpr int NUM_STEPS = 7;
 constexpr int32_t STEP_HZ[NUM_STEPS] = {10, 100, 1000, 10000, 100000, 1000000, 10000000};
 constexpr const char *STEP_NAME[NUM_STEPS] = {"10Hz", "100Hz", "1kHz", "10kHz",
@@ -42,14 +42,14 @@ constexpr int NUM_MEM = 20;
 
 // Preset band centre frequencies (slots 0..NUM_PRESETS-1). The memory chip
 // shows MEM_ALIAS; the remaining slots stay free for user memories.
-constexpr int NUM_PRESETS = 15;
+// Kept at or below MAX_FREQ (150 MHz): MAR/LMR (159/165 MHz) are out of range.
+constexpr int NUM_PRESETS = 13;
 constexpr int32_t MEM_PRESET_HZ[NUM_PRESETS] = {
     1900000,   3700000,   7050000,   10125000, 14175000, 18110000, 21225000,
-    24940000,  28850000,  52000000,  98000000, 122500000, 146000000,
-    159000000, 165000000};
+    24940000,  28850000,  52000000,  98000000, 122500000, 146000000};
 constexpr const char *MEM_ALIAS[NUM_PRESETS] = {
     "160M", "80M", "40M", "30M", "20M", "17M", "15M", "12M",
-    "10M",  "6M",  "AIRM", "ATC", "2M", "MAR", "LMR"};
+    "10M",  "6M",  "AIRM", "ATC", "2M"};
 
 // Carrier / BFO (CLK1 = I, CLK2 = Q). USB/LSB shift the BFO off the carrier.
 constexpr int32_t SB_OFFSET_HZ = 1500;

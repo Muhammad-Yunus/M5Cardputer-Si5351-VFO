@@ -30,8 +30,8 @@ Cardputer berperan sebagai *controller* + *display* + *keypad*, sedangkan modul
 
 - **Rentang output 1 MHz – 150 MHz** pada `CLK0` Si5351 (LO).
 - **Tuning bertahap (step):** 10 Hz, 100 Hz, 1 kHz, 10 kHz, 100 kHz, 1 MHz, 10 MHz.
-- **20 memori** frekuensi (next/prev + simpan). 10 slot pertama sudah diisi
-  preset band HF/VHF umum.
+- **20 memori** frekuensi (next/prev + simpan). 13 slot pertama sudah diisi
+  preset band HF/VHF umum (semua ≤ 150 MHz).
 - **Entry frekuensi langsung** (ketik dalam Hz lalu Enter).
 - **IF offset** yang bisa diatur: LO = frekuensi tampil + offset, sedangkan
   display tetap menunjukkan frekuensi sinyal (untuk receiver superheterodyne).
@@ -145,7 +145,7 @@ M5Cardputer-Si5351-VFO/
 | `` ` `` (Esc)       | Batalkan entry langsung                       |
 | `m`                 | Memori **berikutnya** (memuat frekuensinya)   |
 | `n`                 | Memori **sebelumnya**                         |
-| `s`                 | **Simpan** frekuensi saat ini ke memori aktif |
+| `s`                 | **Simpan**. Frekuensi preset: langsung tersimpan. Frekuensi bebas: muncul popup nama 4 karakter (0-9/A-Z), `Enter` simpan ke slot user kosong, `Esc` batal |
 | `c`                 | **Siklus carrier**: OFF → USB → LSB → OFF      |
 | `o`                 | Set **IF offset** (Hz, boleh negatif lalu Enter) |
 | `i`                 | Set **frekuensi carrier/BFO** (Hz lalu Enter)  |
