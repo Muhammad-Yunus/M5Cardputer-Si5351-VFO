@@ -404,8 +404,8 @@ void update_ui() {
     int32_t center = MEM_PRESET_HZ[vfo.mem_index];
     mem_dirty = (vfo.freq != center);
     // show alias only if we're close to the preset band center (tolerance ~2% or within a reasonable window)
-    int32_t tol = center / 50; // ~2%
-    if (tol < 5000) tol = 5000;
+    int32_t tol = center / 25; // ~4%
+    if (tol < 10000) tol = 10000;
     if (abs(vfo.freq - center) <= tol) {
       show_alias = true;
     }
