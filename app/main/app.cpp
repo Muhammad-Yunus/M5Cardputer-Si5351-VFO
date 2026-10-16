@@ -1,3 +1,4 @@
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -131,6 +132,16 @@ lv_obj_t *batt_tip = nullptr;  // little terminal nub
 int batt_pct_last = -1;
 lv_obj_t *help_overlay = nullptr;
 bool help_open = false;
+
+// save-name popup state (opened by 's' on a non-preset frequency)
+bool save_open = false;
+std::string save_name;
+int save_slot = -1;
+lv_obj_t *save_overlay = nullptr;
+lv_obj_t *lbl_save_name = nullptr;
+// custom 4-char labels for the user memory slots (16..20); empty == unnamed
+char mem_label[NUM_MEM][5] = {};
+
 lv_obj_t *lbl_entry = nullptr;
 lv_obj_t *pointer_tri = nullptr;
 lv_obj_t *ch_labels[3] = {}; // CH2 (left), CH1 (mid), CH0 (right)
@@ -411,8 +422,13 @@ void update_ui() {
   } else {
     bool mem_dirty = (vfo.memories[vfo.mem_index] != 0 &&
                       vfo.memories[vfo.mem_index] != vfo.freq);
-    lv_label_set_text_fmt(lbl_mem, "%02d%s", vfo.mem_index + 1,
-                          mem_dirty ? "*" : " ");
+    if (mem_label[vfo.mem_index][0] != '\0') {
+      lv_label_set_text_fmt(lbl_mem, "%s%s", mem_label[vfo.mem_index],
+                            mem_dirty ? "*" : " ");
+    } else {
+      lv_label_set_text_fmt(lbl_mem, "%02d%s", vfo.mem_index + 1,
+                            mem_dirty ? "*" : " ");
+    }
   }
   char off[32];
   format_mhz_offset(vfo.if_offset, off, sizeof(off));
@@ -495,6 +511,74 @@ void load_memory() {
   }
 }
 
+// True when the dial frequency sits close to one of the preset band centres,
+// so pressing 's' can just store it without asking for a custom name.
+bool freq_in_preset() {
+  for (int i = 0; i < NUM_PRESETS; i++) {
+    int32_t center = MEM_PRESET_HZ[i];
+    int32_t tol = center / 25; // ~4%
+    if (tol < 10000) tol = 10000;
+    if (tol > 50000) tol = 50000;
+    if (llabs((long long)vfo.freq - (long long)center) <= tol) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Next empty user memory slot (indices NUM_PRESETS..NUM_MEM-1), searching just
+// after the current slot and wrapping; falls back to the next user slot when
+// every one of them is already occupied.
+int next_free_slot() {
+  for (int k = 1; k <= NUM_MEM; k++) {
+    int idx = (vfo.mem_index + k) % NUM_MEM;
+    if (idx >= NUM_PRESETS && vfo.memories[idx] == 0) {
+      return idx;
+    }
+  }
+  for (int k = 1; k <= NUM_MEM; k++) {
+    int idx = (vfo.mem_index + k) % NUM_MEM;
+    if (idx >= NUM_PRESETS) {
+      return idx;
+    }
+  }
+  return NUM_PRESETS;
+}
+
+void refresh_save_name() {
+  if (save_name.empty()) {
+    lv_label_set_text(lbl_save_name, "_");
+  } else {
+    lv_label_set_text_fmt(lbl_save_name, "%s_", save_name.c_str());
+  }
+}
+
+void close_save_popup() {
+  save_open = false;
+  lv_obj_add_flag(save_overlay, LV_OBJ_FLAG_HIDDEN);
+}
+
+void open_save_popup() {
+  save_open = true;
+  save_name.clear();
+  save_slot = next_free_slot();
+  refresh_save_name();
+  lv_obj_remove_flag(save_overlay, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_move_foreground(save_overlay);
+}
+
+// Store the dial frequency plus its 4-char label into the chosen user slot.
+void commit_save() {
+  if (save_slot >= NUM_PRESETS && !save_name.empty()) {
+    vfo.memories[save_slot] = vfo.freq;
+    snprintf(mem_label[save_slot], sizeof(mem_label[save_slot]), "%s",
+             save_name.c_str());
+    vfo.mem_index = save_slot;
+  }
+  close_save_popup();
+  update_ui();
+}
+
 // Commit the number currently in the entry buffer to whatever is being edited.
 void apply_entry() {
   if (vfo.entry.empty() || vfo.entry == "-") {
@@ -545,6 +629,29 @@ void handle_key(const KeyMsg &msg) {
     help_open = true;
     lv_obj_remove_flag(help_overlay, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(help_overlay);
+    return;
+  }
+
+  // save-name popup: collect up to 4 alphanumerics (shown uppercase),
+  // Enter = store into the next free user slot, Esc/` = cancel.
+  if (save_open) {
+    if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') ||
+        (c >= 'a' && c <= 'z')) {
+      if (save_name.size() < 4) {
+        save_name.push_back((char)toupper((unsigned char)c));
+      }
+    } else if (c == '\b') {
+      if (!save_name.empty()) {
+        save_name.pop_back();
+      }
+    } else if (c == '\n') {
+      commit_save();
+      return;
+    } else if (special == SK::ESC || c == '`') {
+      close_save_popup();
+      return;
+    }
+    refresh_save_name();
     return;
   }
 
@@ -616,7 +723,12 @@ void handle_key(const KeyMsg &msg) {
     load_memory();
     break;
   case 's':
-    memorize();
+    if (freq_in_preset()) {
+      memorize();
+    } else {
+      open_save_popup();
+      return; // popup draws itself; refresh happens on Enter/Esc
+    }
     break;
   case 'c': // cycle carrier: OFF -> USB -> LSB -> OFF
     vfo.car_mode = (vfo.car_mode + 1) % 4;
@@ -1064,6 +1176,53 @@ extern "C" void app_main(void) {
   help_cell("help", 1, 1, 5);
   help_cell("Esc", 2, 1, 5);
   help_cell("close", 3, 1, 5);
+
+  // save-name popup: dim the screen and prompt for a 4-char label (Enter to
+  // store into the next free user memory slot, Esc to cancel). Created hidden.
+  save_overlay = lv_obj_create(scr);
+  lv_obj_set_size(save_overlay, W, H);
+  lv_obj_clear_flag(save_overlay, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_radius(save_overlay, 0, 0);
+  lv_obj_set_style_border_width(save_overlay, 0, 0);
+  lv_obj_set_style_bg_color(save_overlay, lv_color_black(), 0);
+  lv_obj_set_style_bg_opa(save_overlay, LV_OPA_70, 0);
+  lv_obj_set_style_pad_all(save_overlay, 0, 0);
+  lv_obj_set_flex_flow(save_overlay, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(save_overlay, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_row(save_overlay, 8, 0);
+  lv_obj_align(save_overlay, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_add_flag(save_overlay, LV_OBJ_FLAG_HIDDEN);
+
+  lv_obj_t *save_panel = lv_obj_create(save_overlay);
+  lv_obj_set_size(save_panel, LV_PCT(86), LV_SIZE_CONTENT);
+  lv_obj_clear_flag(save_panel, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_radius(save_panel, 6, 0);
+  lv_obj_set_style_border_width(save_panel, 1, 0);
+  lv_obj_set_style_border_color(save_panel, lv_color_hex(COL_STATUS), 0);
+  lv_obj_set_style_bg_color(save_panel, lv_color_hex(COL_FOOTER_BG), 0);
+  lv_obj_set_style_bg_opa(save_panel, LV_OPA_COVER, 0);
+  lv_obj_set_style_pad_all(save_panel, 8, 0);
+  lv_obj_set_style_pad_row(save_panel, 4, 0);
+  lv_obj_set_flex_flow(save_panel, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(save_panel, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+
+  lv_obj_t *save_title = lv_label_create(save_panel);
+  lv_obj_set_style_text_font(save_title, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(save_title, lv_color_hex(COL_STATUS), 0);
+  lv_label_set_text(save_title, "SAVE MEMORY");
+
+  lbl_save_name = lv_label_create(save_panel);
+  lv_obj_set_style_text_font(lbl_save_name, &lv_font_montserrat_28, 0);
+  lv_obj_set_style_text_color(lbl_save_name, lv_color_hex(COL_READOUT), 0);
+  lv_obj_set_style_text_align(lbl_save_name, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_text(lbl_save_name, "_");
+
+  lv_obj_t *save_hint = lv_label_create(save_panel);
+  lv_obj_set_style_text_font(save_hint, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(save_hint, lv_color_hex(COL_STATUS), 0);
+  lv_label_set_text(save_hint, "Enter=save  Esc=cancel");
 
   // --- keyboard ---
   cardputer.initialize_keyboard(on_key);
