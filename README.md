@@ -149,6 +149,7 @@ M5Cardputer-Si5351-VFO/
 | `c`                 | **Siklus carrier**: OFF → USB → LSB → OFF      |
 | `o`                 | Set **IF offset** (Hz, boleh negatif lalu Enter) |
 | `i`                 | Set **frekuensi carrier/BFO** (Hz lalu Enter)  |
+| `p`                 | Toggle fasa CH2: **90°** (quadrature I/Q) ↔ **0°** (sefase). Label berubah `CH2 (Q)` ↔ `CH2` |
 
 Aransemen fisik `, . /` (bawah) dan `;` (atas) membentuk pola D-pad.
 

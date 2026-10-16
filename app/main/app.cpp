@@ -27,6 +27,7 @@
 //     m  = next memory      n  = previous memory  s = store into memory
 //     c  = cycle carrier (OFF -> USB -> LSB)   o = set IF offset (Hz, +/-)
 //     i  = set carrier/BFO frequency (Hz)
+//     p  = toggle CH2 carrier phase: 90 deg (I/Q quadrature) <-> 0 deg
 //   LO output = displayed frequency + IF offset; carrier I/Q on CLK1/CLK2.
 // ---------------------------------------------------------------------------
 
@@ -145,6 +146,7 @@ char mem_label[NUM_MEM][5] = {};
 lv_obj_t *lbl_entry = nullptr;
 lv_obj_t *pointer_tri = nullptr;
 lv_obj_t *ch_labels[3] = {}; // CH2 (left), CH1 (mid), CH0 (right)
+bool ch2_quad = true;        // CH2 in quadrature (90 deg) vs in phase (0 deg)
 lv_obj_t *ch_sep = nullptr;
 lv_point_precise_t ch_sep_pts[2] = {};
 lv_obj_t *tick_lines[NTICKS] = {};
@@ -301,7 +303,7 @@ void apply_carrier() {
   } else if (vfo.car_mode == 3) {
     f -= SB_OFFSET_HZ;
   }
-  syn->set_carrier((uint32_t)f, vfo.car_mode != 0);
+  syn->set_carrier((uint32_t)f, vfo.car_mode != 0, ch2_quad);
 }
 
 void set_freq(int32_t f) {
@@ -462,6 +464,8 @@ void update_ui() {
       ch_wave_active[i] = on;
       ch_wave_render(i); // switch sine <-> flatline immediately
     }
+    // CH2 label shows (Q) only while it really is the quadrature output.
+    lv_label_set_text(ch_labels[0], ch2_quad ? "CH2 (Q)" : "CH2");
   }
   update_scale();
 }
@@ -741,6 +745,10 @@ void handle_key(const KeyMsg &msg) {
   case 'i': // edit the carrier / BFO centre frequency
     vfo.entry_target = ENTRY_CAR;
     vfo.entry.clear();
+    break;
+  case 'p': // toggle CH2 phase: 90 deg (quadrature) <-> 0 deg (in phase)
+    ch2_quad = !ch2_quad;
+    apply_carrier();
     break;
   default:
     if (c >= '0' && c <= '9') {
@@ -1143,7 +1151,7 @@ extern "C" void app_main(void) {
   static lv_coord_t help_cols[] = {LV_GRID_FR(3), LV_GRID_FR(7), LV_GRID_FR(3),
                                    LV_GRID_FR(7), LV_GRID_TEMPLATE_LAST};
   static lv_coord_t help_rows[] = {
-      LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_CONTENT,
+      LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_CONTENT,
       LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST};
   lv_obj_set_grid_dsc_array(help_panel, help_cols, help_rows);
   lv_obj_set_style_pad_row(help_panel, 1, 0);
@@ -1176,6 +1184,8 @@ extern "C" void app_main(void) {
   help_cell("help", 1, 1, 5);
   help_cell("Esc", 2, 1, 5);
   help_cell("close", 3, 1, 5);
+  help_cell("p", 0, 1, 6);
+  help_cell("CH2 phase 90/0", 1, 3, 6);
 
   // save-name popup: dim the screen and prompt for a 4-char label (Enter to
   // store into the next free user memory slot, Esc to cancel). Created hidden.

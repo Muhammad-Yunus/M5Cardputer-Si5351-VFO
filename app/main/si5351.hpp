@@ -97,9 +97,11 @@ public:
         return true;
     }
 
-    // Carrier / BFO on CLK1 (I) and CLK2 (Q), 90 degrees apart. enable = false
-    // powers the two outputs back down.
-    bool set_carrier(uint32_t freq_hz, bool enable) {
+    // Carrier / BFO on CLK1 (I) and CLK2 (Q), 90 degrees apart when quadrature
+    // is true. Setting quadrature = false leaves CLK2 at 0 degrees (in phase
+    // with CLK1), useful as a reference for phase-detector calibration.
+    // enable = false powers the two outputs back down.
+    bool set_carrier(uint32_t freq_hz, bool enable, bool quadrature = true) {
         if (!enable) {
             if (!write_reg(17, 0x80) || !write_reg(18, 0x80)) {
                 return false;
@@ -130,10 +132,12 @@ public:
         if (!write_ms(58, n, 0, 1)) {                  // MS2 (Q), integer divider
             return false;
         }
-        if (!write_reg(166, 0)) {                      // CLK1 phase offset = 0
+        if (!write_reg(166, 0)) {                        // CLK1 phase offset = 0
             return false;
         }
-        if (!write_reg(167, static_cast<uint8_t>(n & 0x7F))) { // CLK2 = 90 deg
+        const uint8_t q_phoff =
+            quadrature ? static_cast<uint8_t>(n & 0x7F) : 0; // 90 deg when quad
+        if (!write_reg(167, q_phoff)) {                   // CLK2 phase offset
             return false;
         }
         // CLK1/CLK2: PLLB (bit5) + MSx select (0x0C) + 8 mA (0x03), fractional
