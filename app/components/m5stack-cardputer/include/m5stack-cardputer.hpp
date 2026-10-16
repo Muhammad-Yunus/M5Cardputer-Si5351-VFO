@@ -324,6 +324,19 @@ public:
   /// \note This function will only work after initialize_lcd() has been called
   float brightness() const;
 
+  /// Invert the panel colors at runtime (ST7789 display-inversion command).
+  /// \param invert When true the panel sends INVOFF, swapping the colors (a
+  ///        light-on-dark UI becomes light-background/dark-ink); when false it
+  ///        sends INVON, restoring the panel's normal (dark) look.
+  /// \note This function will only work after initialize_lcd() has been called
+  /// \note The panel boots in its normal (INVON) state; calling this with true
+  ///       flips it to the swapped look without re-drawing anything.
+  void set_panel_invert(bool invert) {
+    // ST7789: INVON = 0x21 (normal), INVOFF = 0x20 (colors swapped).
+    if (lcd_)
+      lcd_->write_command(invert ? 0x20 : 0x21, {});
+  }
+
   /// Get the VRAM 0 pointer (DMA memory used by LVGL)
   /// \return The VRAM 0 pointer
   /// \note This is the memory used by LVGL for rendering

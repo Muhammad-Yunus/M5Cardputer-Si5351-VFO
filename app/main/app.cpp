@@ -28,6 +28,7 @@
 //     c  = cycle carrier (OFF -> USB -> LSB)   o = set IF offset (Hz, +/-)
 //     i  = set carrier/BFO frequency (Hz)
 //     p  = toggle CH2 carrier phase: 90 deg (I/Q quadrature) <-> 0 deg
+//     t  = toggle theme: dark <-> light (panel color inversion)
 //   LO output = displayed frequency + IF offset; carrier I/Q on CLK1/CLK2.
 // ---------------------------------------------------------------------------
 
@@ -104,6 +105,7 @@ struct VfoState {
 };
 
 VfoState vfo;
+bool theme_light = false; // false = dark panel (INVON), true = swapped/light (INVOFF)
 QueueHandle_t key_queue = nullptr;
 Si5351 *syn = nullptr;
 
@@ -750,6 +752,10 @@ void handle_key(const KeyMsg &msg) {
     ch2_quad = !ch2_quad;
     apply_carrier();
     break;
+  case 't': // toggle dark <-> light theme by inverting the panel colors
+    theme_light = !theme_light;
+    espp::M5StackCardputer::get().set_panel_invert(theme_light);
+    break;
   default:
     if (c >= '0' && c <= '9') {
       vfo.entry_target = ENTRY_FREQ;
@@ -1143,7 +1149,8 @@ extern "C" void app_main(void) {
   lv_obj_set_style_border_color(help_panel, lv_color_hex(COL_STATUS), 0);
   lv_obj_set_style_bg_color(help_panel, lv_color_hex(COL_FOOTER_BG), 0);
   lv_obj_set_style_bg_opa(help_panel, LV_OPA_COVER, 0);
-  lv_obj_set_style_pad_all(help_panel, 6, 0);
+  lv_obj_set_style_pad_hor(help_panel, 6, 0);
+  lv_obj_set_style_pad_ver(help_panel, 3, 0);
 
   // lay it out as a grid: 4 columns (15% / 35% / 15% / 35%); the first two
   // rows only use the first key column and let the value span the rest.
@@ -1152,9 +1159,10 @@ extern "C" void app_main(void) {
                                    LV_GRID_FR(7), LV_GRID_TEMPLATE_LAST};
   static lv_coord_t help_rows[] = {
       LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_CONTENT,
-      LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST};
+      LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_CONTENT,
+      LV_GRID_TEMPLATE_LAST};
   lv_obj_set_grid_dsc_array(help_panel, help_cols, help_rows);
-  lv_obj_set_style_pad_row(help_panel, 1, 0);
+  lv_obj_set_style_pad_row(help_panel, 0, 0);
   lv_obj_set_style_pad_column(help_panel, 4, 0);
 
   auto help_cell = [&](const char *txt, int col, int span, int row) {
@@ -1186,6 +1194,8 @@ extern "C" void app_main(void) {
   help_cell("close", 3, 1, 5);
   help_cell("p", 0, 1, 6);
   help_cell("CH2 phase 90/0", 1, 3, 6);
+  help_cell("t", 0, 1, 7);
+  help_cell("theme dark/light", 1, 3, 7);
 
   // save-name popup: dim the screen and prompt for a 4-char label (Enter to
   // store into the next free user memory slot, Esc to cancel). Created hidden.
