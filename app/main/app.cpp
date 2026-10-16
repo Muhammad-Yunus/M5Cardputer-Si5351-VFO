@@ -406,6 +406,7 @@ void update_ui() {
     // show alias only if we're close to the preset band center (tolerance ~2% or within a reasonable window)
     int32_t tol = center / 25; // ~4%
     if (tol < 10000) tol = 10000;
+    if (tol > 50000) tol = 50000;
     if (abs(vfo.freq - center) <= tol) {
       show_alias = true;
     }
