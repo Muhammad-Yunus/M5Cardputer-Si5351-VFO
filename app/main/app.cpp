@@ -618,7 +618,96 @@ void apply_entry() {
 
 // ---- key handling ---------------------------------------------------------
 
+// Distinct click tone per key. Notes follow a C-major pentatonic scale so any
+// combination of successive key presses sounds pleasant; each key maps to its
+// own step so the pitch is unique and recognisable.
+float tone_hz_for_key(char c, uint8_t special) {
+  using SK = espp::M5StackCardputer::SpecialKey;
+  int idx;
+  if (c >= '0' && c <= '9') {
+    idx = c - '0'; // 0..9
+  } else {
+    switch (c) {
+    case ',': idx = 10; break;
+    case '/': idx = 11; break;
+    case ';': idx = 12; break;
+    case '.': idx = 13; break;
+    case 'm': idx = 14; break;
+    case 'n': idx = 15; break;
+    case 's': idx = 16; break;
+    case 'c': idx = 17; break;
+    case 'o': idx = 18; break;
+    case 'i': idx = 19; break;
+    case 'p': idx = 20; break;
+    case 't': idx = 21; break;
+    case 'h': idx = 22; break;
+    case '\n': idx = 23; break;
+    case '\b': idx = 24; break;
+    case '-': idx = 25; break;
+    case '`': idx = 26; break;
+    default:
+      // value 0 means "no character"; fall back to the special key so
+      // Fn+arrows / Esc still get their own tone.
+      switch (static_cast<SK>(special)) {
+      case SK::LEFT: idx = 10; break;
+      case SK::RIGHT: idx = 11; break;
+      case SK::UP: idx = 12; break;
+      case SK::DOWN: idx = 13; break;
+      case SK::ESC: idx = 26; break;
+      default: idx = 27; break;
+      }
+      break;
+    }
+  }
+  // Semitone offsets of the C-major pentatonic scale (C D E G A), 3 octaves.
+  static const int pent[] = {0,  2,  4,  7,  9,  12, 14, 16, 19, 21,
+                             24, 26, 28, 31, 33, 36, 38, 40, 43, 45,
+                             48, 50, 52, 55, 57, 60, 62, 64};
+  const int n = static_cast<int>(sizeof(pent) / sizeof(pent[0]));
+  if (idx < 0) {
+    idx = 0;
+  }
+  const int semi = pent[idx % n] + 12 * (idx / n);
+  return 110.0f * std::pow(2.0f, semi / 12.0f); // 110 Hz base (A2)
+}
+
+// Synthesise a short sine tone with a small attack/release envelope (removes
+// the click you otherwise get from abruptly starting/stopping a sample stream)
+// and hand it to the BSP's non-blocking I2S player.
+void play_tone(float freq_hz, uint16_t ms) {
+  auto &cp = espp::M5StackCardputer::get();
+  const uint32_t sr = cp.audio_sample_rate();
+  if (sr == 0 || cp.is_muted()) {
+    return;
+  }
+  static int16_t buf[44100 * 80 / 1000]; // up to 80 ms @ 44.1 kHz
+  size_t n = static_cast<size_t>(sr) * ms / 1000;
+  const size_t max_n = sizeof(buf) / sizeof(buf[0]);
+  if (n > max_n) {
+    n = max_n;
+  }
+  const float two_pi = 6.2831853f;
+  const float amp = 0.22f * 32767.0f;
+  const size_t ramp = sr / 250; // ~4 ms attack / release
+  if (ramp == 0) {
+    return;
+  }
+  for (size_t i = 0; i < n; i++) {
+    float env = 1.0f;
+    if (i < ramp) {
+      env = static_cast<float>(i) / static_cast<float>(ramp);
+    } else if (i + ramp > n) {
+      env = static_cast<float>(n - i) / static_cast<float>(ramp);
+    }
+    buf[i] = static_cast<int16_t>(amp * env *
+                                  std::sin(two_pi * freq_hz * i / sr));
+  }
+  cp.play_audio(reinterpret_cast<const uint8_t *>(buf),
+                static_cast<uint32_t>(n * sizeof(int16_t)));
+}
+
 void handle_key(const KeyMsg &msg) {
+  play_tone(tone_hz_for_key(msg.value, msg.special), 45);
   char c = msg.value;
   auto special = static_cast<espp::M5StackCardputer::SpecialKey>(msg.special);
   using SK = espp::M5StackCardputer::SpecialKey;
@@ -800,6 +889,14 @@ extern "C" void app_main(void) {
     return;
   }
   cardputer.led(espp::Hsv(30.0f, 1.0f, 0.5f)); // warm dial-lamp amber
+
+  // Speaker for the per-key click tones (safe: the microphone is not used, so
+  // there is no GPIO 43 conflict with the NS4168 I2S amp).
+  if (!cardputer.initialize_sound()) {
+    printf("Gagal initialize_sound (tone)!\n");
+  } else {
+    cardputer.volume(40.0f);
+  }
 
   // Force the BSP's variant detection to run now: it briefly opens its internal
   // I2C bus on GPIO 8/9 (I2C port 0), then releases the port. Doing this before
