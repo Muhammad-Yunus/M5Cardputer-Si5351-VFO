@@ -435,7 +435,7 @@ void update_ui() {
     }
   }
   char off[32];
-  lv_label_set_text_fmt(lbl_aux, "IF CH0 %s", off);
+  format_mhz_offset(vfo.if_offset, off, sizeof(off));
   lv_label_set_text_fmt(lbl_aux, "IF CH0 %s", off);
   lv_label_set_text_fmt(lbl_aux, "IF CH0 %s", off);
   lv_color_t car_col = lv_color_hex(car_mode_color());
