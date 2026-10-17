@@ -659,16 +659,17 @@ float tone_hz_for_key(char c, uint8_t special) {
       break;
     }
   }
-  // Semitone offsets of the C-major pentatonic scale (C D E G A), 3 octaves.
-  static const int pent[] = {0,  2,  4,  7,  9,  12, 14, 16, 19, 21,
-                             24, 26, 28, 31, 33, 36, 38, 40, 43, 45,
-                             48, 50, 52, 55, 57, 60, 62, 64};
-  const int n = static_cast<int>(sizeof(pent) / sizeof(pent[0]));
+  // Each key gets its own pitch, climbing chromatically from A4 (440 Hz).
+  // The Cardputer's NS4168 speaker has almost no output below ~400 Hz and gets
+  // harsh above ~4 kHz, so the range is kept in that band: every key is
+  // distinct and clearly audible.
   if (idx < 0) {
     idx = 0;
   }
-  const int semi = pent[idx % n] + 12 * (idx / n);
-  return 110.0f * std::pow(2.0f, semi / 12.0f); // 110 Hz base (A2)
+  if (idx > 27) {
+    idx = 27;
+  }
+  return 440.0f * std::pow(2.0f, idx / 12.0f); // 440 Hz .. ~2.1 kHz
 }
 
 // Synthesise a short sine tone with a small attack/release envelope (removes
@@ -687,7 +688,7 @@ void play_tone(float freq_hz, uint16_t ms) {
     n = max_n;
   }
   const float two_pi = 6.2831853f;
-  const float amp = 0.22f * 32767.0f;
+  const float amp = 0.6f * 32767.0f;
   const size_t ramp = sr / 250; // ~4 ms attack / release
   if (ramp == 0) {
     return;
@@ -707,7 +708,7 @@ void play_tone(float freq_hz, uint16_t ms) {
 }
 
 void handle_key(const KeyMsg &msg) {
-  play_tone(tone_hz_for_key(msg.value, msg.special), 45);
+  play_tone(tone_hz_for_key(msg.value, msg.special), 35);
   char c = msg.value;
   auto special = static_cast<espp::M5StackCardputer::SpecialKey>(msg.special);
   using SK = espp::M5StackCardputer::SpecialKey;
@@ -895,7 +896,7 @@ extern "C" void app_main(void) {
   if (!cardputer.initialize_sound()) {
     printf("Gagal initialize_sound (tone)!\n");
   } else {
-    cardputer.volume(40.0f);
+    cardputer.volume(60.0f);
   }
 
   // Force the BSP's variant detection to run now: it briefly opens its internal
