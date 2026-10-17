@@ -436,8 +436,8 @@ void update_ui() {
   }
   char off[32];
   lv_label_set_text_fmt(lbl_aux, "IF CH0 %s", off);
-  lv_label_set_text_fmt(lbl_aux, "IF %s", off);
-  lv_label_set_text(lbl_car, car_mode_name());
+  lv_label_set_text_fmt(lbl_aux, "IF CH0 %s", off);
+  lv_label_set_text_fmt(lbl_aux, "IF CH0 %s", off);
   lv_color_t car_col = lv_color_hex(car_mode_color());
   lv_obj_set_style_line_color(wave_line, car_col, 0);
   lv_obj_set_style_line_color(flat_line, car_col, 0);
