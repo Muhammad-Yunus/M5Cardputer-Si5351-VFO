@@ -889,7 +889,6 @@ extern "C" void app_main(void) {
     printf("Gagal initialize_led!\n");
     return;
   }
-  cardputer.led(espp::Hsv(30.0f, 1.0f, 0.5f)); // warm dial-lamp amber
 
   // Speaker for the per-key click tones (safe: the microphone is not used, so
   // there is no GPIO 43 conflict with the NS4168 I2S amp).
