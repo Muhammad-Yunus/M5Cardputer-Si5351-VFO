@@ -34,7 +34,7 @@
 
 namespace {
 
-constexpr int32_t MIN_FREQ = 1000000;    // 1 MHz
+constexpr int32_t MIN_FREQ = 8000;       // 8 kHz
 constexpr int32_t MAX_FREQ = 150000000;  // 150 MHz (Si5351 usable ceiling here)
 constexpr int NUM_STEPS = 7;
 constexpr int32_t STEP_HZ[NUM_STEPS] = {10, 100, 1000, 10000, 100000, 1000000, 10000000};

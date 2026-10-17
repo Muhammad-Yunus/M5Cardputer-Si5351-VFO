@@ -30,7 +30,7 @@ Cardputer berperan sebagai *controller* + *display* + *keypad*, sedangkan modul
 
 ## Fitur
 
-- **Rentang output 1 MHz – 150 MHz** pada `CLK0` Si5351 (LO).
+- **Rentang output 8 kHz – 150 MHz** pada `CLK0` Si5351 (LO).
 - **Tuning bertahap (step):** 10 Hz, 100 Hz, 1 kHz, 10 kHz, 100 kHz, 1 MHz, 10 MHz.
 - **20 slot memori**: 13 preset band HF/VHF (semua ≤ 150 MHz) + 7 slot user
   dengan label 4 karakter. Navigasi `m`/`n`, simpan dengan `s`.
@@ -203,7 +203,7 @@ Keluar dari monitor dengan `Ctrl + ]`.
 
 - **Output utama:** `CLK0` = LO (sesuai frekuensi tampil + IF offset).
 - **Carrier/BFO:** `CLK1` = I, `CLK2` = Q (aktif bila carrier mode CW/USB/LSB).
-- **Rentang CLK0:** 1 MHz – 150 MHz (dibatasi firmware).
+- **Rentang CLK0:** 8 kHz – 150 MHz (dibatasi firmware).
 - **Rentang carrier:** ~4.8 MHz – 100 MHz (dibatasi metode quadrature integer-N).
 - **Referensi:** kristal 25 MHz (asumsi modul Si5351A generik).
 - **Resolusi:** ~0.1 Hz (MultiSynth fraksional, penyebut 20-bit).
