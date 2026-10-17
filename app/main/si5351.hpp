@@ -56,7 +56,7 @@ public:
     // (VCO = N * Fout), which is required once the fractional divider would
     // fall below its minimum of 8 (and lets us reach the VHF band centres).
     bool set_frequency(uint32_t freq_hz, uint8_t clk = 0) {
-        if (freq_hz < 1000000UL || freq_hz > 200000000UL || clk > 2) {
+        if (freq_hz < 8000UL || freq_hz > 200000000UL || clk > 2) {
             return false;
         }
         uint32_t vco_hz = 900000000UL;
