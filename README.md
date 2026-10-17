@@ -86,7 +86,13 @@ Alamat I2C Si5351: **0x60**.
 - Download STL file : [💾 Download](docs/cardputer-3d-spacer.stl)
 
 ### Hardware Setup
-<img src="docs/hardware-setup.jpeg" alt="hardware setup" style="max-width:60%">
+<table style="border: none; border-collapse: collapse;">
+  <tr style="border: none;">
+    <td style="border: none; padding: 2px;"><img src="docs/hardware-setup.jpeg" alt="hardware setup 1" style="max-width:100%"></td>
+    <td style="border: none; padding: 2px;"><img src="docs/hardware-setup-2.jpeg" alt="hardware setup 2" style="max-width:100%"></td>
+    <td style="border: none; padding: 2px;"><img src="docs/hardware-setup-3.jpeg" alt="hardware setup 3" style="max-width:100%"></td>
+  </tr>
+</table>
 ---
 
 ## Arsitektur Perangkat Lunak
