@@ -161,6 +161,17 @@ public:
         return clk < 8 && !(oeb_ & (1u << clk));
     }
 
+    // Read a single register (combined write-address / repeated-start read).
+    bool read_reg(uint8_t reg, uint8_t &value) {
+        return i2c_.write_read(address_, &reg, 1, &value, 1);
+    }
+
+    // Read the live Device Status register (0x00):
+    //   bit7 SYS_INIT, bit6 LOL_B, bit5 LOL_A, bit4 LOS (Si5351C only).
+    bool read_status(uint8_t &status) {
+        return read_reg(0x00, status);
+    }
+
 private:
     bool write_reg(uint8_t reg, uint8_t value) {
         uint8_t data[2] = {reg, value};

@@ -1,5 +1,6 @@
 #include <cctype>
 #include <cmath>
+#include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -145,6 +146,12 @@ lv_obj_t *lbl_save_name = nullptr;
 // custom 4-char labels for the user memory slots (16..20); empty == unnamed
 char mem_label[NUM_MEM][5] = {};
 
+// Si5351 error popup state (shown when a set fails or a PLL does not lock)
+bool err_open = false;
+lv_obj_t *err_overlay = nullptr;
+lv_obj_t *lbl_err_title = nullptr;
+lv_obj_t *lbl_err_msg = nullptr;
+
 lv_obj_t *lbl_entry = nullptr;
 lv_obj_t *pointer_tri = nullptr;
 lv_obj_t *ch_labels[3] = {}; // CH2 (left), CH1 (mid), CH0 (right)
@@ -285,11 +292,71 @@ void format_mhz_offset(int32_t hz, char *buf, size_t n) {
            (unsigned)frac);
 }
 
+const char *car_mode_name();
+
+// Show the modal error popup; Enter or Esc closes it.
+void show_error(const char *title, const char *fmt, ...) {
+  if (!err_overlay) {
+    return;
+  }
+  char msg[128];
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(msg, sizeof(msg), fmt, ap);
+  va_end(ap);
+  lv_label_set_text(lbl_err_title, title);
+  lv_label_set_text(lbl_err_msg, msg);
+  lv_obj_remove_flag(err_overlay, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_move_foreground(err_overlay);
+  err_open = true;
+  printf("Si5351 ERROR: %s: %s\n", title, msg);
+}
+
+// Poll the Si5351 Device Status register until the requested PLL(s) report
+// lock. Returns nullptr on success, otherwise a short reason for the popup.
+const char *si_wait_lock(bool want_a, bool want_b, uint32_t timeout_ms) {
+  if (!syn) {
+    return "Si5351 not initialised";
+  }
+  const char *reason = "status read failed";
+  uint32_t start = xTaskGetTickCount();
+  for (;;) {
+    uint8_t st = 0;
+    if (!syn->read_status(st)) {
+      reason = "I2C status read failed";
+    } else if (st & 0x80) {
+      reason = "Si5351 still initialising";
+    } else if (st & 0x10) {
+      reason = "reference clock lost";
+    } else if (want_a && (st & 0x20)) {
+      reason = "PLL A not locked (LOL_A)";
+    } else if (want_b && (st & 0x40)) {
+      reason = "PLL B not locked (LOL_B)";
+    } else {
+      return nullptr;
+    }
+    if ((xTaskGetTickCount() - start) > pdMS_TO_TICKS(timeout_ms)) {
+      return reason;
+    }
+    vTaskDelay(pdMS_TO_TICKS(2));
+  }
+}
+
 // The LO actually runs at (display frequency + IF offset); the display never
 // shows the offset, matching the reference VFO behaviour.
 void apply_lo() {
-  if (syn) {
-    syn->set_frequency((uint32_t)(vfo.freq + vfo.if_offset), 0);
+  if (!syn) {
+    return;
+  }
+  uint32_t lo_hz = (uint32_t)(vfo.freq + vfo.if_offset);
+  if (!syn->set_frequency(lo_hz, 0)) {
+    show_error("SET FREQ FAILED", "CLK0 %lu Hz\nI2C write failed",
+               (unsigned long)lo_hz);
+    return;
+  }
+  const char *why = si_wait_lock(true, false, 100);
+  if (why) {
+    show_error("FREQ LOCK FAILED", "CLK0 %lu Hz\n%s", (unsigned long)lo_hz, why);
   }
 }
 
@@ -305,7 +372,20 @@ void apply_carrier() {
   } else if (vfo.car_mode == 3) {
     f -= SB_OFFSET_HZ;
   }
-  syn->set_carrier((uint32_t)f, vfo.car_mode != 0, ch2_quad);
+  bool enabled = vfo.car_mode != 0;
+  if (!syn->set_carrier((uint32_t)f, enabled, ch2_quad)) {
+    show_error("SET CARRIER FAILED", "%s %ld Hz\nI2C write failed",
+               car_mode_name(), (long)f);
+    return;
+  }
+  if (!enabled) {
+    return; // outputs disabled: no PLL lock to verify
+  }
+  const char *why = si_wait_lock(false, true, 100);
+  if (why) {
+    show_error("CARRIER LOCK FAILED", "%s %ld Hz\n%s", car_mode_name(), (long)f,
+               why);
+  }
 }
 
 void set_freq(int32_t f) {
@@ -712,6 +792,15 @@ void handle_key(const KeyMsg &msg) {
   char c = msg.value;
   auto special = static_cast<espp::M5StackCardputer::SpecialKey>(msg.special);
   using SK = espp::M5StackCardputer::SpecialKey;
+
+  // Error popup: Enter or Esc closes it; while open, swallow other keys.
+  if (err_open) {
+    if (c == '\n' || special == SK::ESC || c == '`') {
+      err_open = false;
+      lv_obj_add_flag(err_overlay, LV_OBJ_FLAG_HIDDEN);
+    }
+    return;
+  }
 
   // Help popup: 'h' toggles it, Esc closes it. While open, swallow other keys.
   if (help_open) {
@@ -1340,6 +1429,55 @@ extern "C" void app_main(void) {
   lv_obj_set_style_text_font(save_hint, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(save_hint, lv_color_hex(COL_STATUS), 0);
   lv_label_set_text(save_hint, "Enter=save  Esc=cancel");
+
+  // Si5351 error popup: shown when a frequency/carrier change fails or the PLL
+  // does not report lock. Enter/Esc closes it. Created hidden.
+  err_overlay = lv_obj_create(scr);
+  lv_obj_set_size(err_overlay, W, H);
+  lv_obj_clear_flag(err_overlay, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_radius(err_overlay, 0, 0);
+  lv_obj_set_style_border_width(err_overlay, 0, 0);
+  lv_obj_set_style_bg_color(err_overlay, lv_color_black(), 0);
+  lv_obj_set_style_bg_opa(err_overlay, LV_OPA_70, 0);
+  lv_obj_set_style_pad_all(err_overlay, 0, 0);
+  lv_obj_set_flex_flow(err_overlay, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(err_overlay, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_row(err_overlay, 8, 0);
+  lv_obj_align(err_overlay, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_add_flag(err_overlay, LV_OBJ_FLAG_HIDDEN);
+
+  lv_obj_t *err_panel = lv_obj_create(err_overlay);
+  lv_obj_set_size(err_panel, LV_PCT(88), LV_SIZE_CONTENT);
+  lv_obj_clear_flag(err_panel, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_radius(err_panel, 6, 0);
+  lv_obj_set_style_border_width(err_panel, 1, 0);
+  lv_obj_set_style_border_color(err_panel, lv_color_hex(COL_POINTER), 0);
+  lv_obj_set_style_bg_color(err_panel, lv_color_hex(COL_FOOTER_BG), 0);
+  lv_obj_set_style_bg_opa(err_panel, LV_OPA_COVER, 0);
+  lv_obj_set_style_pad_all(err_panel, 8, 0);
+  lv_obj_set_style_pad_row(err_panel, 4, 0);
+  lv_obj_set_flex_flow(err_panel, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(err_panel, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+
+  lbl_err_title = lv_label_create(err_panel);
+  lv_obj_set_style_text_font(lbl_err_title, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(lbl_err_title, lv_color_hex(COL_POINTER), 0);
+  lv_label_set_text(lbl_err_title, "Si5351 ERROR");
+
+  lbl_err_msg = lv_label_create(err_panel);
+  lv_obj_set_style_text_font(lbl_err_msg, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(lbl_err_msg, lv_color_hex(COL_READOUT), 0);
+  lv_obj_set_style_text_align(lbl_err_msg, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_long_mode(lbl_err_msg, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(lbl_err_msg, LV_PCT(100));
+  lv_label_set_text(lbl_err_msg, "");
+
+  lv_obj_t *err_hint = lv_label_create(err_panel);
+  lv_obj_set_style_text_font(err_hint, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(err_hint, lv_color_hex(COL_STATUS), 0);
+  lv_label_set_text(err_hint, "Enter/Esc = close");
 
   // --- keyboard ---
   cardputer.initialize_keyboard(on_key);
