@@ -173,9 +173,17 @@ public:
     }
 
 private:
+    // Retry I2C writes up to 3 times for transient bus errors
     bool write_reg(uint8_t reg, uint8_t value) {
         uint8_t data[2] = {reg, value};
-        return i2c_.write(address_, data, 2);
+        for (int retry = 0; retry < 3; ++retry) {
+            if (i2c_.write(address_, data, 2)) {
+                return true;
+            }
+            // Small delay between retries to let bus recover
+            esp_rom_delay_us(100);
+        }
+        return false;
     }
 
     // Output enable register (3) shadow: a set bit *disables* the matching clock.
@@ -234,7 +242,13 @@ private:
         for (size_t i = 0; i < 8; ++i) {
             buf[i + 1] = regs[i];
         }
-        return i2c_.write(address_, buf, 9);
+        for (int retry = 0; retry < 3; ++retry) {
+            if (i2c_.write(address_, buf, 9)) {
+                return true;
+            }
+            esp_rom_delay_us(100);
+        }
+        return false;
     }
 
     espp::I2c &i2c_;
