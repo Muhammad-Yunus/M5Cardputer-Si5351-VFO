@@ -418,6 +418,9 @@ void set_freq(int32_t f) {
   }
   vfo.freq = f;
   apply_lo();
+  if (vfo.car_follows_lo) {
+    apply_carrier();
+  }
 }
 
 // Render the current numeric entry, grouped for plain frequencies and with an
