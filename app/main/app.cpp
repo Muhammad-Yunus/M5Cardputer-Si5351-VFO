@@ -961,15 +961,11 @@ void handle_key(const KeyMsg &msg) {
     apply_carrier();
     break;
   case 'u': // toggle carrier FOLLOW/MANUAL mode
-    if (!vfo.car_follows_lo) {
-      // Switching to FOLLOW: save current manual freq before switching
-      vfo.car_freq = vfo.freq + vfo.if_offset;
-    }
-    vfo.car_follows_lo = !vfo.car_follows_lo;
     if (vfo.car_follows_lo) {
       // Switching to MANUAL: save current LO freq as manual baseline
       vfo.car_freq = vfo.freq + vfo.if_offset;
     }
+    vfo.car_follows_lo = !vfo.car_follows_lo;
     apply_carrier();
     show_carrier_info();
     break;
@@ -1523,6 +1519,9 @@ extern "C" void app_main(void) {
 
   // --- push the initial LO (and disable the carrier) and draw everything ---
   if (si_ok) {
+    // Explicitly set FOLLOW mode default on boot
+    vfo.car_follows_lo = true;
+    vfo.car_freq = vfo.freq + vfo.if_offset;
     apply_lo();
     apply_carrier();
   }
