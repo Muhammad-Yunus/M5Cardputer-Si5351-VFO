@@ -313,6 +313,19 @@ void show_error(const char *title, const char *fmt, ...) {
   printf("Si5351 ERROR: %s: %s\n", title, msg);
 }
 
+// Show a short info popup about carrier FOLLOW/MANUAL mode
+void show_carrier_info() {
+  if (!err_overlay) return;
+  const char *mode = vfo.car_follows_lo ? "FOLLOW" : "MANUAL";
+  const char *desc = vfo.car_follows_lo
+    ? "Carrier follows LO frequency" : "Carrier uses own freq (car_freq)";
+  lv_label_set_text(lbl_err_title, "CARRIER MODE");
+  lv_label_set_text_fmt(lbl_err_msg, "%s\n%s", mode, desc);
+  lv_obj_remove_flag(err_overlay, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_move_foreground(err_overlay);
+  err_open = true;
+}
+
 // Poll the Si5351 Device Status register until the requested PLL(s) report
 // lock. Returns nullptr on success, otherwise a short reason for the popup.
 const char *si_wait_lock(bool want_a, bool want_b, uint32_t timeout_ms) {
@@ -940,7 +953,15 @@ void handle_key(const KeyMsg &msg) {
     ch2_quad = !ch2_quad;
     apply_carrier();
     break;
-  case 't': // toggle dark <-> light theme by inverting the panel colors
+  case 'u': // toggle carrier FOLLOW/MANUAL mode
+    vfo.car_follows_lo = !vfo.car_follows_lo;
+    if (!vfo.car_follows_lo) {
+      vfo.car_freq = vfo.freq + vfo.if_offset;
+    }
+    apply_carrier();
+    show_carrier_info();
+    break;
+    case 't': // toggle dark <-> light theme by inverting the panel colors
     theme_light = !theme_light;
     espp::M5StackCardputer::get().set_panel_invert(theme_light);
     break;
