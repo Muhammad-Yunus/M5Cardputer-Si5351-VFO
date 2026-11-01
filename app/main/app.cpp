@@ -380,7 +380,14 @@ void apply_carrier() {
   if (!syn) {
     return;
   }
-  int32_t f = vfo.car_freq;
+  int32_t f;
+  if (vfo.car_follows_lo) {
+    // FOLLOW mode: carrier = LO frequency
+    f = vfo.freq + vfo.if_offset;
+  } else {
+    // MANUAL mode: carrier = user-defined frequency
+    f = vfo.car_freq;
+  }
   if (vfo.car_mode == 2) {
     f += SB_OFFSET_HZ;
   } else if (vfo.car_mode == 3) {
@@ -954,8 +961,13 @@ void handle_key(const KeyMsg &msg) {
     apply_carrier();
     break;
   case 'u': // toggle carrier FOLLOW/MANUAL mode
-    vfo.car_follows_lo = !vfo.car_follows_lo;
     if (!vfo.car_follows_lo) {
+      // Switching to FOLLOW: save current manual freq before switching
+      vfo.car_freq = vfo.freq + vfo.if_offset;
+    }
+    vfo.car_follows_lo = !vfo.car_follows_lo;
+    if (vfo.car_follows_lo) {
+      // Switching to MANUAL: save current LO freq as manual baseline
       vfo.car_freq = vfo.freq + vfo.if_offset;
     }
     apply_carrier();
