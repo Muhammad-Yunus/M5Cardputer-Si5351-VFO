@@ -1,4 +1,4 @@
-#include <cctype>
+﻿#include <cctype>
 #include <cmath>
 #include <cstdarg>
 #include <cstdint>
@@ -103,6 +103,7 @@ struct VfoState {
   int32_t if_offset = 0;   // added to the display frequency to form the LO
   int32_t car_freq = 10000000; // carrier / BFO centre frequency (10 MHz)
   int car_mode = 0;        // 0 = off, 1 = CW, 2 = USB, 3 = LSB
+  bool car_follows_lo = true; // carrier follows LO when true
 };
 
 VfoState vfo;
@@ -126,14 +127,15 @@ lv_obj_t *car_chip = nullptr;
 lv_obj_t *wave_line = nullptr;
 lv_obj_t *flat_line = nullptr;
 lv_obj_t *lbl_car = nullptr;
-lv_obj_t *help_chip = nullptr;
-lv_obj_t *lbl_help = nullptr;
 lv_obj_t *batt_box = nullptr;
 lv_obj_t *lbl_batt = nullptr;  // "NN%" text, sits left of the icon
 lv_obj_t *batt_body = nullptr; // battery outline
 lv_obj_t *batt_fill = nullptr; // proportional fill inside the outline
 lv_obj_t *batt_tip = nullptr;  // little terminal nub
 int batt_pct_last = -1;
+// carrier mode indicator icons
+lv_obj_t *car_icon_link = nullptr;   // FOLLOW mode (green)
+lv_obj_t *car_icon_unlink = nullptr; // MANUAL mode (orange)
 lv_obj_t *help_overlay = nullptr;
 bool help_open = false;
 
@@ -152,7 +154,6 @@ lv_obj_t *err_overlay = nullptr;
 lv_obj_t *lbl_err_title = nullptr;
 lv_obj_t *lbl_err_msg = nullptr;
 
-lv_obj_t *lbl_entry = nullptr;
 lv_obj_t *pointer_tri = nullptr;
 lv_obj_t *ch_labels[3] = {}; // CH2 (left), CH1 (mid), CH0 (right)
 bool ch2_quad = true;        // CH2 in quadrature (90 deg) vs in phase (0 deg)
@@ -516,6 +517,14 @@ void update_ui() {
   }
   char off[32];
   format_mhz_offset(vfo.if_offset, off, sizeof(off));
+  // Show carrier mode icon (FOLLOW or MANUAL)
+  if (vfo.car_follows_lo) {
+    lv_obj_remove_flag(car_icon_link, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(car_icon_unlink, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_add_flag(car_icon_link, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(car_icon_unlink, LV_OBJ_FLAG_HIDDEN);
+  }
   lv_label_set_text_fmt(lbl_aux, "IF %s", off);
   lv_label_set_text(lbl_car, car_mode_name());
   lv_color_t car_col = lv_color_hex(car_mode_color());
@@ -1240,29 +1249,16 @@ extern "C" void app_main(void) {
   lv_obj_set_style_pad_hor(status_bar, 5, 0);
   lv_obj_set_style_pad_ver(status_bar, 0, 0);
   lv_obj_align(status_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_set_flex_flow(status_bar, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(status_bar, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_column(status_bar, 8, 0);
 
   lbl_aux = lv_label_create(status_bar);
   lv_obj_set_style_text_font(lbl_aux, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(lbl_aux, lv_color_hex(COL_STATUS), 0);
-  lv_obj_align(lbl_aux, LV_ALIGN_LEFT_MID, 0, 0);
-
-  help_chip = lv_obj_create(status_bar);
-  lv_obj_set_size(help_chip, 18, 18);
-  lv_obj_clear_flag(help_chip, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_style_radius(help_chip, LV_RADIUS_CIRCLE, 0);
-  lv_obj_set_style_border_width(help_chip, 1, 0);
-  lv_obj_set_style_border_color(help_chip, lv_color_hex(COL_STATUS), 0);
-  lv_obj_set_style_bg_opa(help_chip, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_pad_all(help_chip, 0, 0);
-  lv_obj_align(help_chip, LV_ALIGN_RIGHT_MID, 0, 0);
-  lbl_help = lv_label_create(help_chip);
-  lv_obj_set_style_text_font(lbl_help, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(lbl_help, lv_color_hex(COL_STATUS), 0);
-  lv_label_set_text(lbl_help, "?");
-  lv_obj_center(lbl_help);
-
+  lv_obj_set_style_max_width(lbl_aux, W / 2, 0);
   // battery indicator: percent text left of a battery icon whose fill tracks
-  // the state of charge, placed just left of the help chip
+  // the state of charge, tight together at far right
   batt_box = lv_obj_create(status_bar);
   lv_obj_set_size(batt_box, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
   lv_obj_clear_flag(batt_box, LV_OBJ_FLAG_SCROLLABLE);
@@ -1271,13 +1267,23 @@ extern "C" void app_main(void) {
   lv_obj_set_style_bg_opa(batt_box, LV_OPA_TRANSP, 0);
   lv_obj_set_style_pad_all(batt_box, 0, 0);
   lv_obj_set_style_pad_column(batt_box, 3, 0);
+  lv_obj_set_style_pad_row(batt_box, 0, 0);
   lv_obj_set_flex_flow(batt_box, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align(batt_box, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER,
-                        LV_FLEX_ALIGN_CENTER);
-  // Right-align at a fixed offset that leaves room for the help chip (18px +
-  // 5px bar pad) and the icon's terminal nub, so the label grows leftwards.
-  lv_obj_align(batt_box, LV_ALIGN_RIGHT_MID, -26, 0);
+  lv_obj_set_flex_align(batt_box, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
+  // Carrier mode icons (left of battery in right group)
+  car_icon_link = lv_label_create(batt_box);
+  lv_obj_set_style_text_font(car_icon_link, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(car_icon_link, lv_color_hex(0x33CC66), 0);
+  lv_label_set_text(car_icon_link, LV_SYMBOL_REFRESH);
+  lv_obj_set_style_pad_all(car_icon_link, 0, 0);
+
+  car_icon_unlink = lv_label_create(batt_box);
+  lv_obj_set_style_text_font(car_icon_unlink, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(car_icon_unlink, lv_color_hex(0xFF8C1A), 0);
+  lv_label_set_text(car_icon_unlink, LV_SYMBOL_MINUS);
+  lv_obj_set_style_pad_all(car_icon_unlink, 0, 0);
+  lv_obj_add_flag(car_icon_unlink, LV_OBJ_FLAG_HIDDEN);
   lbl_batt = lv_label_create(batt_box);
   lv_obj_set_style_text_font(lbl_batt, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(lbl_batt, lv_color_hex(COL_STATUS), 0);
